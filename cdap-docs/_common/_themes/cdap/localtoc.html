@@ -13,7 +13,7 @@
 #}
 {%- set hidelocaltoc = '' %}
 {%- set hidelocaltoc_key = 'hide-local-toc' %}
-{%- if meta is defined %}
+{%- if meta is defined and meta %}
     {%- if hidelocaltoc_key in meta.viewkeys() %}
       {%- set hidelocaltoc = meta.get(hidelocaltoc_key) %}
     {%- endif %}

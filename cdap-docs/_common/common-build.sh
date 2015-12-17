@@ -89,7 +89,6 @@ else
   NO_COLOR=''
 fi
 WARNING="${RED_BOLD}WARNING:${NO_COLOR}"
-SPHINX_BUILD="sphinx-build ${SPHINX_COLOR} -b html -d ${TARGET}/doctrees"
 
 # Hash of file with "Not Found"; returned by GitHub
 NOT_FOUND_HASH="9d1ead73e678fa2f51a70a933b0bf017"
@@ -144,10 +143,18 @@ function clean() {
   echo
 }
 
+function set_sphinx_build() {
+  if [ "${SPHINX_BUILDER}x" == "x" ]; then
+    SPHINX_BUILDER="html"
+  fi
+  SPHINX_BUILD="sphinx-build ${SPHINX_COLOR} -b ${SPHINX_BUILDER} -d ${TARGET}/doctrees"
+}
+
 function build_docs() {
   clean
   cd ${SCRIPT_PATH}
   check_includes
+  set_sphinx_build
   ${SPHINX_BUILD} -w ${TARGET}/${SPHINX_MESSAGES} ${SOURCE} ${TARGET}/html
   consolidate_messages
 }
@@ -156,6 +163,7 @@ function build_docs_google() {
   clean
   cd ${SCRIPT_PATH}
   check_includes
+  set_sphinx_build
   ${SPHINX_BUILD} -w ${TARGET}/${SPHINX_MESSAGES} -D googleanalytics_id=$1 -D googleanalytics_enabled=1 ${SOURCE} ${TARGET}/html
   consolidate_messages
 }

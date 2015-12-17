@@ -25,7 +25,7 @@
 {%- set hideglobal_toc_key = 'hide-global-toc' %}
 {%- set titles_only_toc = false %}
 {%- set titles_only_toc_key = 'titles-only-toc' %}
-{%- if meta is defined %}
+{%- if meta is defined and meta %}
     {%- if hideglobal_toc_key in meta %}
       {%- set hideglobal_toc = meta[hideglobal_toc_key] %}
     {%- endif %}

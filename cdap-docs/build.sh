@@ -42,6 +42,8 @@ function usage() {
   echo "    docs-web-only     Clean build of HTML, zipped, with docs.cask.co code, skipping Javadocs"
   echo "    docs              Dirty build of HTML with docs.cask.co code, skipping zipping and Javadocs"
   echo 
+  echo "    docs-single       Clean build of HTML, single pages, zipped, with docs.cask.co code, skipping Javadocs"
+  echo 
   echo "    docs-github  Clean build of HTML and Javadocs, zipped, for placing on GitHub"
   echo "    docs-web     Clean build of HTML and Javadocs, zipped, for placing on docs.cask.co webserver"
   echo 
@@ -101,6 +103,7 @@ function run_command() {
     docs-web-only )     build_docs ${WEB_ONLY};;
     docs-github )       build_docs ${GITHUB};;
     docs-web )          build_docs ${WEB};;
+    docs-single )       build_docs_single;;
 
     docs-first-pass )   build_docs_first_pass ;;
     docs-github-part )  build_docs_github_part;;
@@ -235,6 +238,17 @@ function build_docs_github_part() {
   return $?
 }
 
+function build_docs_single() {
+  echo "========================================================"
+  echo "Building Doc Manuals as Single Pages"
+  echo "--------------------------------------------------------"
+  echo
+  SPHINX_BUILDER="singlehtml"
+  export SPHINX_BUILDER
+  build_docs ${WEB_ONLY}
+  return $?
+}
+
 function stash_github_zip() {
   echo "========================================================"
   echo "Stashing GitHub Zip"
@@ -326,6 +340,7 @@ function build_docs_outer_level() {
   if [ "x${google_code}" != "x" ]; then
     google_options="-D googleanalytics_id=${google_code} -D googleanalytics_enabled=1"
   fi
+  set_sphinx_build
   ${SPHINX_BUILD} -w ${TARGET}/${SPHINX_MESSAGES} ${google_options} ${TARGET_PATH}/${SOURCE} ${TARGET_PATH}/${HTML}
   consolidate_messages
   echo

@@ -1,12 +1,12 @@
 .. meta::
     :author: Cask Data, Inc.
-    :copyright: Copyright • 2015 Cask Data, Inc.
+    :copyright: Copyright © 2015-2016 Cask Data, Inc.
 
 .. _cdap-apps-etl-plugins-shared-core-validator:
 
-=============================
-Shared Plugins: CoreValidator
-=============================
+=============
+CoreValidator
+=============
 
 .. rubric:: Description
 
@@ -63,4 +63,13 @@ This table lists the methods available in CoreValidator that can be called from 
    "``isValidInfrastructureTId(String iTld)``","Returns true if the specified ``String`` matches any IANA-defined infrastructure top-level domain."
    "``isValidLocalTId(String lTld)``","Returns true if the specified ``String`` matches any widely used ""local"" domains (localhost or localdomain)."
    "``isValidTId(String tld)``","Returns true if the specified ``String`` matches any IANA-defined top-level domain."
+
+.. 
+.. .. include:: /../target/_includes/hydrator-plugins/transforms/validator.md
+..     :start-line: 10
+..     :end-line:   54
+
+.. include:: validator.md
+    :start-line: 10
+    :end-line:   54
 

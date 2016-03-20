@@ -55,7 +55,7 @@ public final class ContainerLauncherGenerator {
   public static void generateLauncherJar(String launcherClassPath, String classLoaderName,
                                          OutputSupplier<? extends OutputStream> outputSupplier) throws IOException {
     try (JarOutputStream output = new JarOutputStream(outputSupplier.getOutput())) {
-      generateLauncherClass(launcherClassPath, classLoaderName, MRAppMaster.class.getName(), output);
+      generateLauncherClass(launcherClassPath, classLoaderName, MRAppMasterWrapper.class.getName(), output);
       generateLauncherClass(launcherClassPath, classLoaderName, "org.apache.hadoop.mapred.YarnChild", output);
 
       // Includes the launcher class in the JAR as well. No need to trace dependency as the launcher

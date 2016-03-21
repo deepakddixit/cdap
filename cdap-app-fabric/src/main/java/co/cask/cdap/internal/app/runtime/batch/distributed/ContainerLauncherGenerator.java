@@ -91,8 +91,7 @@ public final class ContainerLauncherGenerator {
    */
   private static void generateLauncherClass(String launcherClassPath, String classLoaderName,
                                             String generateClassName, String launchClassName, JarOutputStream output)
-    throws
-    IOException {
+    throws IOException {
     String internalName = generateClassName.replace('.', '/');
 
     ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
@@ -135,6 +134,7 @@ public final class ContainerLauncherGenerator {
     classWriter.visitEnd();
 
     output.putNextEntry(new JarEntry(generateClassName + ".class"));
+    output.putNextEntry(new JarEntry(launchClassName + ".class"));
     output.write(classWriter.toByteArray());
   }
 

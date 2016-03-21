@@ -14,7 +14,7 @@
  * the License.
  */
 
-package co.cask.cdap.internal.app.runtime.batch.distributed;
+package org.apache.hadoop.mapred;
 
 import co.cask.cdap.common.conf.CConfiguration;
 import co.cask.cdap.common.guice.ConfigModule;
@@ -35,9 +35,7 @@ import com.google.inject.Guice;
 import com.google.inject.Injector;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.MRJobConfig;
-import org.apache.hadoop.mapreduce.v2.app.MRAppMaster;
 import org.apache.hadoop.util.ExitUtil;
 import org.apache.twill.internal.Services;
 import org.apache.twill.kafka.client.KafkaClientService;
@@ -48,19 +46,17 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 
 /**
- * Wrapper to wrap MRAppMaster to add logging context
+ * Wrapper for YarnChild
  */
-public class MRAppMasterWrapper {
+public class YarnChildWrapper {
 
-  private static final Logger LOG = LoggerFactory.getLogger(MRAppMasterWrapper.class);
+  private static final Logger LOG = LoggerFactory.getLogger(YarnChildWrapper.class);
   private static ZKClientService zkClient;
   private static KafkaClientService kafkaClient;
   private static LogAppenderInitializer logAppenderInitializer;
   private static Injector injector;
 
-
-  public static void initialize () {
-    LOG.info("Initializing: {}", MRAppMasterWrapper.class.getCanonicalName());
+  public static void initialize() {
     MapReduceContextConfig contextConfig = new MapReduceContextConfig(
       new JobConf(new Path(MRJobConfig.JOB_CONF_FILE)));
     Id.Program programId = Id.fromString(contextConfig.getProgramId(), Id.Program.class);
@@ -78,17 +74,20 @@ public class MRAppMasterWrapper {
 
   public static void main (String[] args) {
     try {
-      LOG.info("Starting services for {}", MRAppMasterWrapper.class.getCanonicalName());
+      LOG.info("Starting services for {}", YarnChildWrapper.class.getCanonicalName());
       initialize();
       startServices();
-      ExitUtil.disableSystemExit(); // Throw Exception on error in MRAppMaster
-      MRAppMaster.main(args);
+      ExitUtil.disableSystemExit(); // Throw Exception on error in YarnChild
+      YarnChild.main(args);
     } catch (Throwable t) {
       LOG.error(t.getMessage(), t);
       throw Throwables.propagate(t);
     } finally {
       try {
-        LOG.info("Stopping services for {}", MRAppMasterWrapper.class.getCanonicalName());
+        if (logAppenderInitializer != null) {
+          logAppenderInitializer.close();
+        }
+        LOG.info("Stopping services for {}", YarnChildWrapper.class.getCanonicalName());
         stopServices();
       } catch (Throwable t) {
         LOG.error(t.getMessage(), t);
@@ -149,5 +148,5 @@ public class MRAppMasterWrapper {
       new LoggingModules().getDistributedModules()
     );
   }
-}
 
+}

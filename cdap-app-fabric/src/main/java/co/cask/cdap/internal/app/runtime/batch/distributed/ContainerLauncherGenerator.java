@@ -90,10 +90,10 @@ public final class ContainerLauncherGenerator {
    * string literals in the generated class.
    */
   private static void generateLauncherClass(String launcherClassPath, String classLoaderName,
-                                            String targetClassName, String wrapperClassName, JarOutputStream output)
+                                            String generateClassName, String launchClassName, JarOutputStream output)
     throws
     IOException {
-    String internalName = targetClassName.replace('.', '/');
+    String internalName = generateClassName.replace('.', '/');
 
     ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
     classWriter.visit(Opcodes.V1_7, Opcodes.ACC_PUBLIC + Opcodes.ACC_SUPER,
@@ -119,13 +119,13 @@ public final class ContainerLauncherGenerator {
                               new Type[] { Type.getType(Exception.class) }, classWriter);
 
     mg.getStatic(Type.getType(System.class), "out", Type.getType(PrintStream.class));
-    mg.visitLdcInsn("Launch class " + wrapperClassName);
+    mg.visitLdcInsn("Launch class " + launchClassName);
     mg.invokeVirtual(Type.getType(PrintStream.class), Methods.getMethod(void.class, "println", String.class));
 
     // The Launcher classpath, classloader name and main classname are stored as string literal in the generated class
     mg.visitLdcInsn(launcherClassPath);
     mg.visitLdcInsn(classLoaderName);
-    mg.visitLdcInsn(wrapperClassName);
+    mg.visitLdcInsn(launchClassName);
     mg.loadArg(0);
     mg.invokeStatic(Type.getType(MapReduceContainerLauncher.class),
                     Methods.getMethod(void.class, "launch", String.class, String.class, String.class, String[].class));
@@ -134,7 +134,7 @@ public final class ContainerLauncherGenerator {
 
     classWriter.visitEnd();
 
-    output.putNextEntry(new JarEntry(wrapperClassName + ".class"));
+    output.putNextEntry(new JarEntry(generateClassName + ".class"));
     output.write(classWriter.toByteArray());
   }
 

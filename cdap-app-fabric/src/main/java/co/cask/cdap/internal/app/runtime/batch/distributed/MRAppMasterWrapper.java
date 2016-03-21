@@ -21,12 +21,9 @@ import co.cask.cdap.common.guice.ConfigModule;
 import co.cask.cdap.common.guice.IOModule;
 import co.cask.cdap.common.guice.KafkaClientModule;
 import co.cask.cdap.common.guice.ZKClientModule;
-import co.cask.cdap.common.logging.LoggingContextAccessor;
 import co.cask.cdap.internal.app.runtime.batch.MapReduceContextConfig;
 import co.cask.cdap.logging.appender.LogAppenderInitializer;
-import co.cask.cdap.logging.context.MapReduceLoggingContext;
 import co.cask.cdap.logging.guice.LoggingModules;
-import co.cask.cdap.proto.Id;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -63,14 +60,14 @@ public class MRAppMasterWrapper {
     LOG.info("Initializing: {}", MRAppMasterWrapper.class.getCanonicalName());
     MapReduceContextConfig contextConfig = new MapReduceContextConfig(
       new JobConf(new Path(MRJobConfig.JOB_CONF_FILE)));
-    Id.Program programId = Id.fromString(contextConfig.getProgramId(), Id.Program.class);
-    MapReduceLoggingContext loggingContext = new MapReduceLoggingContext(programId.getNamespaceId(),
-                                                                         programId.getApplicationId(),
-                                                                         programId.getId(),
-                                                                         contextConfig.getRunId().getId());
+//    Id.Program programId = Id.fromString(contextConfig.getProgramId(), Id.Program.class);
+//    MapReduceLoggingContext loggingContext = new MapReduceLoggingContext(programId.getNamespaceId(),
+//                                                                         programId.getApplicationId(),
+//                                                                         programId.getId(),
+//                                                                         contextConfig.getRunId().getId());
     injector = createGuiceInjector(contextConfig.getCConf(), contextConfig.getHConf());
     injector.getInstance(LogAppenderInitializer.class).initialize();
-    LoggingContextAccessor.setLoggingContext(loggingContext);
+//    LoggingContextAccessor.setLoggingContext(loggingContext);
     zkClient = injector.getInstance(ZKClientService.class);
     kafkaClient = injector.getInstance(KafkaClientService.class);
     logAppenderInitializer = injector.getInstance(LogAppenderInitializer.class);

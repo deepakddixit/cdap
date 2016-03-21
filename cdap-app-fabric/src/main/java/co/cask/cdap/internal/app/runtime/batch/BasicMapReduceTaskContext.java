@@ -35,7 +35,6 @@ import co.cask.cdap.app.metrics.ProgramUserMetrics;
 import co.cask.cdap.app.program.Program;
 import co.cask.cdap.app.runtime.Arguments;
 import co.cask.cdap.common.conf.Constants;
-import co.cask.cdap.common.logging.LoggingContext;
 import co.cask.cdap.data2.dataset2.DatasetFramework;
 import co.cask.cdap.internal.app.runtime.AbstractContext;
 import co.cask.cdap.internal.app.runtime.DefaultTaskLocalizationContext;
@@ -44,8 +43,6 @@ import co.cask.cdap.internal.app.runtime.batch.dataset.ForwardingSplitReader;
 import co.cask.cdap.internal.app.runtime.batch.dataset.MultipleOutputs;
 import co.cask.cdap.internal.app.runtime.plugin.PluginInstantiator;
 import co.cask.cdap.internal.app.runtime.workflow.WorkflowProgramInfo;
-import co.cask.cdap.logging.context.MapReduceLoggingContext;
-import co.cask.cdap.proto.Id;
 import co.cask.tephra.Transaction;
 import co.cask.tephra.TransactionAware;
 import co.cask.tephra.TransactionSystemClient;
@@ -78,7 +75,6 @@ public class BasicMapReduceTaskContext<KEYOUT, VALUEOUT> extends AbstractContext
   implements MapReduceTaskContext<KEYOUT, VALUEOUT> {
 
   private final MapReduceSpecification spec;
-  private final LoggingContext loggingContext;
   private final WorkflowProgramInfo workflowProgramInfo;
   private final Metrics userMetrics;
   private final Map<String, Plugin> plugins;
@@ -118,17 +114,11 @@ public class BasicMapReduceTaskContext<KEYOUT, VALUEOUT> extends AbstractContext
     } else {
       this.userMetrics = null;
     }
-    this.loggingContext = createLoggingContext(program.getId(), runId);
     this.spec = spec;
     this.plugins = Maps.newHashMap(program.getApplicationSpecification().getPlugins());
     this.taskLocalizationContext = new DefaultTaskLocalizationContext(localizedResources);
 
     initializeTransactionAwares();
-  }
-
-  private LoggingContext createLoggingContext(Id.Program programId, RunId runId) {
-    return new MapReduceLoggingContext(programId.getNamespaceId(), programId.getApplicationId(),
-                                       programId.getId(), runId.getId());
   }
 
   @Override
@@ -224,9 +214,6 @@ public class BasicMapReduceTaskContext<KEYOUT, VALUEOUT> extends AbstractContext
     return userMetrics;
   }
 
-  public LoggingContext getLoggingContext() {
-    return loggingContext;
-  }
 
   //---- following are methods to manage transaction lifecycle for the datasets. This needs to
   //---- be refactored after [TEPHRA-99] and [CDAP-3893] are resolved.

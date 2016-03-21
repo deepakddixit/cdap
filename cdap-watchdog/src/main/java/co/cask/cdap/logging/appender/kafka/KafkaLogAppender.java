@@ -57,6 +57,7 @@ public final class KafkaLogAppender extends LogAppender {
   @Override
   protected void append(LogMessage logMessage) {
     try {
+      System.out.println("In Kafka Appender.... " + logMessage.getMessage());
       byte [] bytes = loggingEventSerializer.toBytes(logMessage.getLoggingEvent(), logMessage.getLoggingContext());
       producer.publish(logMessage.getLoggingContext().getLogPartition(), bytes);
     } catch (Throwable t) {

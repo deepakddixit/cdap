@@ -20,6 +20,7 @@ import co.cask.cdap.internal.asm.Methods;
 import com.google.common.base.Preconditions;
 import com.google.common.io.OutputSupplier;
 import com.google.common.io.Resources;
+import org.apache.hadoop.mapred.YarnChildWrapper;
 import org.apache.hadoop.mapreduce.v2.app.MRAppMaster;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -55,8 +56,10 @@ public final class ContainerLauncherGenerator {
   public static void generateLauncherJar(String launcherClassPath, String classLoaderName,
                                          OutputSupplier<? extends OutputStream> outputSupplier) throws IOException {
     try (JarOutputStream output = new JarOutputStream(outputSupplier.getOutput())) {
-      generateLauncherClass(launcherClassPath, classLoaderName, MRAppMasterWrapper.class.getName(), output);
-      generateLauncherClass(launcherClassPath, classLoaderName, "org.apache.hadoop.mapred.YarnChildWrapper", output);
+      generateLauncherClass(launcherClassPath, classLoaderName, MRAppMaster.class.getName(),
+                            MRAppMasterWrapper.class.getName(), output);
+      generateLauncherClass(launcherClassPath, classLoaderName, "org.apache.hadoop.mapred.YarnChildWrapper",
+                            YarnChildWrapper.class.getName(), output);
 
       // Includes the launcher class in the JAR as well. No need to trace dependency as the launcher
       // class must be dependency free.
@@ -87,8 +90,10 @@ public final class ContainerLauncherGenerator {
    * string literals in the generated class.
    */
   private static void generateLauncherClass(String launcherClassPath, String classLoaderName,
-                                            String className, JarOutputStream output) throws IOException {
-    String internalName = className.replace('.', '/');
+                                            String targetClassName, String wrapperClassName, JarOutputStream output)
+    throws
+    IOException {
+    String internalName = targetClassName.replace('.', '/');
 
     ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
     classWriter.visit(Opcodes.V1_7, Opcodes.ACC_PUBLIC + Opcodes.ACC_SUPER,
@@ -114,13 +119,13 @@ public final class ContainerLauncherGenerator {
                               new Type[] { Type.getType(Exception.class) }, classWriter);
 
     mg.getStatic(Type.getType(System.class), "out", Type.getType(PrintStream.class));
-    mg.visitLdcInsn("Launch class " + className);
+    mg.visitLdcInsn("Launch class " + wrapperClassName);
     mg.invokeVirtual(Type.getType(PrintStream.class), Methods.getMethod(void.class, "println", String.class));
 
     // The Launcher classpath, classloader name and main classname are stored as string literal in the generated class
     mg.visitLdcInsn(launcherClassPath);
     mg.visitLdcInsn(classLoaderName);
-    mg.visitLdcInsn(className);
+    mg.visitLdcInsn(wrapperClassName);
     mg.loadArg(0);
     mg.invokeStatic(Type.getType(MapReduceContainerLauncher.class),
                     Methods.getMethod(void.class, "launch", String.class, String.class, String.class, String[].class));
@@ -129,7 +134,7 @@ public final class ContainerLauncherGenerator {
 
     classWriter.visitEnd();
 
-    output.putNextEntry(new JarEntry(internalName + ".class"));
+    output.putNextEntry(new JarEntry(wrapperClassName + ".class"));
     output.write(classWriter.toByteArray());
   }
 

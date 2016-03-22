@@ -54,10 +54,12 @@ public final class SimpleKafkaProducer {
     ProducerConfig config = new ProducerConfig(props);
     kafkaTopic = cConf.get(Constants.Logging.KAFKA_TOPIC);
     producer = new Producer<>(config);
+    System.out.println("SimpleKafkaProducer constructor");
   }
 
   public void publish(String key, byte[] bytes) {
     try {
+      System.out.println("publishing from SimpleKafkaProducer...");
       KeyedMessage<String, byte[]> data = new KeyedMessage<>(kafkaTopic, key, bytes);
       producer.send(data);
     } catch (Throwable t) {

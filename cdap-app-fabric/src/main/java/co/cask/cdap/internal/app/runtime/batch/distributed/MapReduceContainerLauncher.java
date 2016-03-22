@@ -86,6 +86,13 @@ public class MapReduceContainerLauncher {
     // Invoke MapReduceClassLoader.getTaskContextProvider()
     classLoader.getClass().getDeclaredMethod("getTaskContextProvider").invoke(classLoader);
 
+    System.out.println("printing Mapreduceclassloader classpath");
+
+    URL[] classPaths = ((URLClassLoader) classLoader).getURLs();
+    for (URL clsPath: classPaths) {
+      System.out.println(clsPath.getFile());
+    }
+
     Class<?> mainClass = classLoader.loadClass(mainClassName);
     Method mainMethod = mainClass.getMethod("main", String[].class);
     mainMethod.setAccessible(true);

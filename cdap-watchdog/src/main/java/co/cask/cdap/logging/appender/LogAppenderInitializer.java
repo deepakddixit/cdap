@@ -57,6 +57,7 @@ public class LogAppenderInitializer implements Closeable {
     ILoggerFactory loggerFactory = LoggerFactory.getILoggerFactory();
     // TODO: fix logging issue in mapreduce:  ENG-3279
     if (!(loggerFactory instanceof LoggerContext)) {
+      System.out.println("*********** LoggerFactory is not a logback LoggerContext. No log appender is added.");
       LOG.warn("LoggerFactory is not a logback LoggerContext. No log appender is added. " +
                  "Logback might not be in the classpath");
       return;

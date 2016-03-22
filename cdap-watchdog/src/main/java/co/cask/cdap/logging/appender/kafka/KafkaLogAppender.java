@@ -41,6 +41,7 @@ public final class KafkaLogAppender extends LogAppender {
 
   @Inject
   KafkaLogAppender(CConfiguration cConf) {
+    System.out.println("KafkaLogAppender constructor");
     setName(APPENDER_NAME);
     addInfo("Initializing KafkaLogAppender...");
 
@@ -48,16 +49,24 @@ public final class KafkaLogAppender extends LogAppender {
     try {
       this.loggingEventSerializer = new LoggingEventSerializer();
     } catch (IOException e) {
+      e.printStackTrace();
       addError("Error initializing KafkaLogAppender.", e);
       throw Throwables.propagate(e);
     }
+    System.out.println("Done KafkaLogAppender constructor");
     addInfo("Successfully initialized KafkaLogAppender.");
+  }
+
+  @Override
+  public void start() {
+    System.out.println("KafkaLogAppender start called");
+    super.start();
   }
 
   @Override
   protected void append(LogMessage logMessage) {
     try {
-      System.out.println("In Kafka Appender.... " + logMessage.getMessage());
+      System.out.println("***** Starting to append in KafkaAppender " + logMessage.getMessage());
       byte [] bytes = loggingEventSerializer.toBytes(logMessage.getLoggingEvent(), logMessage.getLoggingContext());
       producer.publish(logMessage.getLoggingContext().getLogPartition(), bytes);
     } catch (Throwable t) {

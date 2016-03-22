@@ -113,7 +113,7 @@ public class MapReduceTaskContextProvider extends AbstractIdleService {
   }
 
   /**
-   * Creates a {@link Program} instance based on the information from the {@link MapReduceContextConfig}, using
+   * Creates a {@link Program} instance based on the information from the {@link `textConfig}, using
    * the given program ClassLoader.
    */
   private Program createProgram(MapReduceContextConfig contextConfig, ClassLoader programClassLoader) {

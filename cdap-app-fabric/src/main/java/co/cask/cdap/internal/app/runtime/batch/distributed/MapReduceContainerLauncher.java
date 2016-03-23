@@ -16,6 +16,8 @@
 
 package co.cask.cdap.internal.app.runtime.batch.distributed;
 
+import co.cask.cdap.internal.app.runtime.batch.MapReduceClassLoader;
+
 import java.io.File;
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
@@ -88,7 +90,7 @@ public class MapReduceContainerLauncher {
 
     System.out.println("printing Mapreduceclassloader classpath");
 
-    URL[] classPaths = ((URLClassLoader) classLoader).getURLs();
+    URL[] classPaths = ((MapReduceClassLoader) classLoader).getClassPaths();
     for (URL clsPath: classPaths) {
       System.out.println(clsPath.getFile());
     }

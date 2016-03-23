@@ -47,6 +47,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -108,6 +111,17 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
         return new MapReduceTaskContextProvider(injector);
       }
     });
+  }
+
+  public URL[] getClassPaths (){
+    List<ClassLoader> classLoaders = getDelegates();
+    URL[] urls = null;
+    for (ClassLoader classLoader : classLoaders) {
+      if (classLoader instanceof URLClassLoader) {
+        urls = ((URLClassLoader) classLoader).getURLs();
+      }
+    }
+    return urls;
   }
 
   /**

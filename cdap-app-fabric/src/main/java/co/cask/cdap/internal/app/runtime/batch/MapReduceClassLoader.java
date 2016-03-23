@@ -49,7 +49,6 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -143,6 +142,7 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
    * Returns the {@link MapReduceTaskContextProvider} associated with this ClassLoader.
    */
   public MapReduceTaskContextProvider getTaskContextProvider() {
+    System.out.println("Thread name in getTaskContextProvider: " + Thread.currentThread().getName());
     synchronized (this) {
       taskContextProvider = Optional.fromNullable(taskContextProvider).or(taskContextProviderSupplier);
     }

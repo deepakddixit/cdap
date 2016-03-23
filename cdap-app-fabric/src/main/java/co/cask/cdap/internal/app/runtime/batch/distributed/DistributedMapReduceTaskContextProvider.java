@@ -104,6 +104,7 @@ public final class DistributedMapReduceTaskContextProvider extends MapReduceTask
       MapReduceLoggingContext loggingContext = new MapReduceLoggingContext(programId.getNamespace(), programId
         .getApplication(), programId.getProgram(), runId.getId());
       LoggingContextAccessor.setLoggingContext(loggingContext);
+      System.out.println("Thread name in startup: " + Thread.currentThread().getName());
     } catch (Exception e) {
       // Try our best to stop services. Chain stop guarantees it will stop everything, even some of them failed.
       try {
@@ -120,6 +121,7 @@ public final class DistributedMapReduceTaskContextProvider extends MapReduceTask
     super.shutDown();
     Exception failure = null;
     try {
+      System.out.println("Thread name in shutdown: " + Thread.currentThread().getName());
       logAppenderInitializer.close();
     } catch (Exception e) {
       failure = e;

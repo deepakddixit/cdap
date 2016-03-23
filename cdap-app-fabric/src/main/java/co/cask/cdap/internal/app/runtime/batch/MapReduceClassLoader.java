@@ -113,7 +113,7 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
     });
   }
 
-  public URL[] getClassPaths (){
+  public URL[] getClassPaths () {
     List<ClassLoader> classLoaders = getDelegates();
     URL[] urls = null;
     for (ClassLoader classLoader : classLoaders) {

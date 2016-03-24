@@ -24,7 +24,6 @@ import co.cask.cdap.common.guice.IOModule;
 import co.cask.cdap.common.guice.KafkaClientModule;
 import co.cask.cdap.common.guice.LocationRuntimeModule;
 import co.cask.cdap.common.guice.ZKClientModule;
-import co.cask.cdap.common.logging.LoggingContextAccessor;
 import co.cask.cdap.data.runtime.DataFabricDistributedModule;
 import co.cask.cdap.data.runtime.DataSetsModules;
 import co.cask.cdap.data.runtime.TransactionExecutorModule;
@@ -34,14 +33,11 @@ import co.cask.cdap.data2.util.hbase.HBaseTableUtil;
 import co.cask.cdap.data2.util.hbase.HBaseTableUtilFactory;
 import co.cask.cdap.explore.guice.ExploreClientModule;
 import co.cask.cdap.internal.app.runtime.batch.MapReduceClassLoader;
-import co.cask.cdap.internal.app.runtime.batch.MapReduceContextConfig;
 import co.cask.cdap.internal.app.runtime.batch.MapReduceTaskContextProvider;
 import co.cask.cdap.logging.appender.LogAppender;
 import co.cask.cdap.logging.appender.LogAppenderInitializer;
 import co.cask.cdap.logging.appender.kafka.KafkaLogAppender;
-import co.cask.cdap.logging.context.MapReduceLoggingContext;
 import co.cask.cdap.metrics.guice.MetricsClientRuntimeModule;
-import co.cask.cdap.proto.id.ProgramId;
 import co.cask.tephra.distributed.ThriftClientProvider;
 import co.cask.tephra.metrics.TxMetricsCollector;
 import co.cask.tephra.runtime.TransactionModules;
@@ -52,7 +48,6 @@ import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Scopes;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.twill.api.RunId;
 import org.apache.twill.internal.Services;
 import org.apache.twill.kafka.client.KafkaClientService;
 import org.apache.twill.zookeeper.ZKClientService;
@@ -66,7 +61,6 @@ import java.util.List;
  */
 public final class DistributedMapReduceTaskContextProvider extends MapReduceTaskContextProvider {
 
-  private final Configuration hConf;
   private final ZKClientService zkClientService;
   private final KafkaClientService kafkaClientService;
   private final MetricsCollectionService metricsCollectionService;
@@ -77,7 +71,6 @@ public final class DistributedMapReduceTaskContextProvider extends MapReduceTask
 
     Injector injector = getInjector();
 
-    this.hConf = injector.getInstance(Configuration.class);
     this.zkClientService = injector.getInstance(ZKClientService.class);
     this.kafkaClientService = injector.getInstance(KafkaClientService.class);
     this.metricsCollectionService = injector.getInstance(MetricsCollectionService.class);
@@ -98,13 +91,6 @@ public final class DistributedMapReduceTaskContextProvider extends MapReduceTask
                                  zkClientService.state(), kafkaClientService.state(), metricsCollectionService.state());
       }
       logAppenderInitializer.initialize();
-      MapReduceContextConfig contextConfig = new MapReduceContextConfig(hConf);
-      ProgramId programId = contextConfig.getProgramId();
-      RunId runId = contextConfig.getRunId();
-      MapReduceLoggingContext loggingContext = new MapReduceLoggingContext(programId.getNamespace(), programId
-        .getApplication(), programId.getProgram(), runId.getId());
-      LoggingContextAccessor.setLoggingContext(loggingContext);
-      System.out.println("Thread name in startup: " + Thread.currentThread().getName());
     } catch (Exception e) {
       // Try our best to stop services. Chain stop guarantees it will stop everything, even some of them failed.
       try {
@@ -121,7 +107,6 @@ public final class DistributedMapReduceTaskContextProvider extends MapReduceTask
     super.shutDown();
     Exception failure = null;
     try {
-      System.out.println("Thread name in shutdown: " + Thread.currentThread().getName());
       logAppenderInitializer.close();
     } catch (Exception e) {
       failure = e;

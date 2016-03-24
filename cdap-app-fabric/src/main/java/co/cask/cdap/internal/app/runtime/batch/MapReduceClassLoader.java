@@ -51,8 +51,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -116,17 +114,6 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
     });
   }
 
-  public URL[] getClassPaths () {
-    List<ClassLoader> classLoaders = getDelegates();
-    URL[] urls = null;
-    for (ClassLoader classLoader : classLoaders) {
-      if (classLoader instanceof URLClassLoader) {
-        urls = ((URLClassLoader) classLoader).getURLs();
-      }
-    }
-    return urls;
-  }
-
   /**
    * Constructs a ClassLoader based on the given {@link Parameters} and also uses the given
    * {@link TaskContextProviderFactory} to create {@link MapReduceTaskContextProvider} on demand.
@@ -146,13 +133,8 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
    * Returns the {@link MapReduceTaskContextProvider} associated with this ClassLoader.
    */
   public MapReduceTaskContextProvider getTaskContextProvider() {
-    System.out.println("Thread name in getTaskContextProvider: " + Thread.currentThread().getName());
-
-    MapReduceContextConfig contextConfig = new MapReduceContextConfig(parameters.getHConf());
-    ProgramId programId = contextConfig.getProgramId();
-    RunId runId = contextConfig.getRunId();
-    MapReduceLoggingContext loggingContext = new MapReduceLoggingContext(programId.getNamespace(), programId
-      .getApplication(), programId.getProgram(), runId.getId());
+    // Logging context needs to be set in the same thread.
+    MapReduceLoggingContext loggingContext = createMapReduceLoggingContext();
     LoggingContextAccessor.setLoggingContext(loggingContext);
 
     synchronized (this) {
@@ -160,6 +142,17 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
     }
     taskContextProvider.startAndWait();
     return taskContextProvider;
+  }
+
+  /**
+   * Creates logging context for MapReduce
+   */
+  private MapReduceLoggingContext createMapReduceLoggingContext() {
+    MapReduceContextConfig contextConfig = new MapReduceContextConfig(parameters.getHConf());
+    ProgramId programId = contextConfig.getProgramId();
+    RunId runId = contextConfig.getRunId();
+    return new MapReduceLoggingContext(programId.getNamespace(), programId.getApplication(),
+                                       programId.getProgram(), runId.getId());
   }
 
   /**

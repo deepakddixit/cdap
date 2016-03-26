@@ -104,7 +104,9 @@ public class LogHandler extends AbstractHttpHandler {
                          long fromTimeSecsParam, long toTimeSecsParam, boolean escape, String filterStr,
                          @Nullable RunRecordMeta runRecord) {
     try {
-      TimeRange timeRange = parseTime(fromTimeSecsParam, toTimeSecsParam, responder);
+      TimeRange timeRange = parseTime(fromTimeSecsParam, toTimeSecsParam,
+                                      TimeUnit.SECONDS.toMillis(runRecord.getStartTs()),
+                                      TimeUnit.SECONDS.toMillis(runRecord.getStopTs() + 1), responder);
       if (timeRange == null) {
         return;
       }
@@ -263,7 +265,9 @@ public class LogHandler extends AbstractHttpHandler {
                       @QueryParam("escape") @DefaultValue("true") boolean escape,
                       @QueryParam("filter") @DefaultValue("") String filterStr) {
     try {
-      TimeRange timeRange = parseTime(fromTimeSecsParam, toTimeSecsParam, responder);
+      long currentTime = System.currentTimeMillis();
+      TimeRange timeRange = parseTime(fromTimeSecsParam, toTimeSecsParam, currentTime - TimeUnit.HOURS.toMillis(1),
+                                      currentTime, responder);
       if (timeRange == null) {
         return;
       }
@@ -343,10 +347,10 @@ public class LogHandler extends AbstractHttpHandler {
     }
   }
 
-  private static TimeRange parseTime(long fromTimeSecsParam, long toTimeSecsParam, HttpResponder responder) {
-    long fromMillis = fromTimeSecsParam < 0 ?
-      System.currentTimeMillis() - TimeUnit.HOURS.toMillis(1) : TimeUnit.SECONDS.toMillis(fromTimeSecsParam);
-    long toMillis = toTimeSecsParam < 0 ? System.currentTimeMillis() : TimeUnit.SECONDS.toMillis(toTimeSecsParam);
+  private static TimeRange parseTime(long fromTimeSecsParam, long toTimeSecsParam, long runFromTime, long runToTime,
+                                     HttpResponder responder) {
+    long fromMillis = fromTimeSecsParam < 0 ? runFromTime : TimeUnit.SECONDS.toMillis(fromTimeSecsParam);
+    long toMillis = toTimeSecsParam < 0 ? runToTime : TimeUnit.SECONDS.toMillis(toTimeSecsParam);
 
     if (toMillis <= fromMillis) {
       responder.sendString(HttpResponseStatus.BAD_REQUEST, "Invalid time range. " +

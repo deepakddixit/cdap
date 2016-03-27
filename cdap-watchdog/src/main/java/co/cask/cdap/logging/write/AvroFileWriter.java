@@ -115,13 +115,14 @@ public final class AvroFileWriter implements Closeable, Flushable {
 
   @Override
   public void close() throws IOException {
+    LOG.trace("in AvroFileWriter.close()");
     if (!closed.compareAndSet(false, true)) {
       return;
     }
 
     // First checkpoint state
     try {
-      LOG.trace("in flush....");
+      LOG.trace("flushing before closing....");
       flush();
     } catch (Exception e) {
       LOG.error("Caught exception while checkpointing", e);
@@ -137,11 +138,13 @@ public final class AvroFileWriter implements Closeable, Flushable {
         LOG.error("Caught exception while closing file {}", entry.getValue().getLocation(), e);
       }
     }
+    LOG.trace("Clearing fileMap.clear()");
     fileMap.clear();
   }
 
   @Override
   public void flush() throws IOException {
+    LOG.trace("in flush()");
     long currentTs = System.currentTimeMillis();
 
     for (Iterator<Map.Entry<String, AvroFile>> it = fileMap.entrySet().iterator(); it.hasNext();) {
@@ -150,10 +153,12 @@ public final class AvroFileWriter implements Closeable, Flushable {
 
       // Close inactive files
       if (currentTs - avroFile.getLastModifiedTs() > inactiveIntervalMs) {
+        LOG.trace("closing Avrofile: {}", avroFile.toString());
         avroFile.close();
         it.remove();
       }
     }
+    LOG.trace("End of flush()");
   }
 
   private AvroFile getAvroFile(LoggingContext loggingContext, long timestamp) throws Exception {
@@ -270,6 +275,7 @@ public final class AvroFileWriter implements Closeable, Flushable {
 
     @Override
     public void close() throws IOException {
+      LOG.trace("in AvroFile close()");
       if (!isOpen) {
         return;
       }

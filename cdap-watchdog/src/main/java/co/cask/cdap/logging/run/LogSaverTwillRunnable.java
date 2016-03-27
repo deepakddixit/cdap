@@ -56,6 +56,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Twill wrapper for running LogSaver through Twill.
@@ -175,6 +176,13 @@ public final class LogSaverTwillRunnable extends AbstractTwillRunnable {
 
     Futures.getUnchecked(Services.chainStop(logSaverStatusService, logSaverService,
                                             metricsCollectionService, kafkaClientService, zkClientService));
+
+    try {
+      wait(TimeUnit.SECONDS.toMillis(30));
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }
+
     completion.set(null);
   }
 

@@ -78,8 +78,9 @@ public class CheckpointingLogFileWriter implements LogFileWriter<KafkaLogEvent> 
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-
+    LOG.trace("after compareAndSet");
     flush();
+    LOG.trace("after flush");
     avroFileWriter.close();
   }
 

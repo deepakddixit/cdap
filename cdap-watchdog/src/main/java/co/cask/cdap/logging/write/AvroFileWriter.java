@@ -121,6 +121,7 @@ public final class AvroFileWriter implements Closeable, Flushable {
 
     // First checkpoint state
     try {
+      LOG.trace("in flush....");
       flush();
     } catch (Exception e) {
       LOG.error("Caught exception while checkpointing", e);
@@ -130,6 +131,7 @@ public final class AvroFileWriter implements Closeable, Flushable {
     LOG.info("Closing all files");
     for (Map.Entry<String, AvroFile> entry : fileMap.entrySet()) {
       try {
+        LOG.trace("In closing files");
         entry.getValue().close();
       } catch (Throwable e) {
         LOG.error("Caught exception while closing file {}", entry.getValue().getLocation(), e);
@@ -281,7 +283,7 @@ public final class AvroFileWriter implements Closeable, Flushable {
           outputStream.close();
         }
       }
-
+      LOG.trace("In close file... File closed");
       isOpen = false;
     }
   }

@@ -104,11 +104,14 @@ public final class LogSaver extends AbstractIdleService {
 
   @VisibleForTesting
   void unscheduleTasks() {
+    LOG.trace("in unscheduleTasks.......");
     cancelLogCollectorCallbacks();
+    LOG.trace("After cancelLogCollectorCallbacks");
 
     for (KafkaLogProcessor processor : messageProcessors) {
       try {
         // Catching the exception to let all the plugins a chance to stop cleanly.
+        LOG.trace("Stopping KafkaLogProcessor...");
         processor.stop();
       } catch (Throwable th) {
         LOG.error("Error stopping processor {}",

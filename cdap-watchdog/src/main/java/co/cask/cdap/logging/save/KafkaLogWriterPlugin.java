@@ -224,18 +224,24 @@ public class KafkaLogWriterPlugin extends AbstractKafkaLogProcessor {
 
   @Override
   public void stop() {
+    LOG.trace("In KafkaLogWriterPlugin.stop() .....");
     try {
       if (countDownLatch != null) {
         countDownLatch.countDown();
+        LOG.trace("In countDownLatch......");
       }
 
       if (scheduledExecutor != null) {
+        LOG.trace("Before  scheduledExecutor.....");
         scheduledExecutor.shutdown();
         scheduledExecutor.awaitTermination(5, TimeUnit.MINUTES);
+        LOG.trace("After  scheduledExecutor.....");
       }
 
+      LOG.trace("Before logFileWriter close()");
       logFileWriter.flush();
       logFileWriter.close();
+      LOG.trace("After logFileWriter close()");
 
     } catch (Exception e) {
       LOG.error("Caught exception while closing logWriter {}", e.getMessage(), e);

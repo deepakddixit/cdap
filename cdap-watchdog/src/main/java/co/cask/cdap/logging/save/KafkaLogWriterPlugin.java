@@ -241,7 +241,6 @@ public class KafkaLogWriterPlugin extends AbstractKafkaLogProcessor {
       LOG.trace("Before logFileWriter flush()");
       logFileWriter.flush();
       LOG.trace("After logFileWriter flush()... ");
-      LOG.trace("Before logFileWriter close()");
       logFileWriter.close();
       LOG.trace("After logFileWriter close()");
 

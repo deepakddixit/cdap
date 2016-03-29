@@ -178,13 +178,17 @@ public abstract class ResourceBalancerService extends AbstractIdleService {
           LOG.info("Partitions changed {}, service: {}", partitions, serviceName);
           try {
             if (service != null) {
+              LOG.info("Stopping service: {}", serviceName);
               service.stopAndWait();
+              LOG.info("Stopped service: {}", serviceName);
             }
             if (partitions.isEmpty() || !election.isRunning()) {
               service = null;
             } else {
+              LOG.info("Creating service: {}", serviceName);
               service = createService(partitions);
               service.startAndWait();
+              LOG.info("Created service: {}", serviceName);
             }
           } catch (Throwable t) {
             LOG.error("Failed to change partitions, service: {}.", serviceName, t);
@@ -195,7 +199,9 @@ public abstract class ResourceBalancerService extends AbstractIdleService {
         @Override
         public void finished(Throwable failureCause) {
           if (service != null) {
+            LOG.info("Stopping service: {}", serviceName);
             service.stopAndWait();
+            LOG.info("Stopped service: {}", serviceName);
             service = null;
           }
         }

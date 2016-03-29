@@ -159,7 +159,7 @@ public final class AvroFileWriter implements Closeable, Flushable {
       }
     }
     LOG.trace("End of flush()");
-  }
+}
 
   private AvroFile getAvroFile(LoggingContext loggingContext, long timestamp) throws Exception {
     AvroFile avroFile = fileMap.get(loggingContext.getLogPathFragment(logBaseDir));

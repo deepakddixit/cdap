@@ -104,19 +104,21 @@ public class LogHandler extends AbstractHttpHandler {
                          long fromTimeSecsParam, long toTimeSecsParam, boolean escape, String filterStr,
                          @Nullable RunRecordMeta runRecord) {
     try {
-      long runFromTime;
-      long runToTime;
+      long runFromTimeMillis;
+      long runToTimeMillis;
 
+      // fetch past 1 hour logs, if runId is not specified
       if (runRecord == null) {
         long currentTime = System.currentTimeMillis();
-        runFromTime = currentTime - TimeUnit.HOURS.toMillis(1);
-        runToTime = currentTime;
+        runFromTimeMillis = currentTime - TimeUnit.HOURS.toMillis(1);
+        runToTimeMillis = currentTime;
       } else {
-        runFromTime = TimeUnit.SECONDS.toMillis(runRecord.getStartTs());
-        runToTime = TimeUnit.SECONDS.toMillis(runRecord.getStopTs() + 1);
+        runFromTimeMillis = TimeUnit.SECONDS.toMillis(runRecord.getStartTs());
+        runToTimeMillis = TimeUnit.SECONDS.toMillis(runRecord.getStopTs() + 1);
       }
 
-      TimeRange timeRange = parseTime(fromTimeSecsParam, toTimeSecsParam, runFromTime, runToTime, responder);
+      TimeRange timeRange = parseTime(fromTimeSecsParam, toTimeSecsParam,
+                                      runFromTimeMillis, runToTimeMillis, responder);
 
       if (timeRange == null) {
         return;

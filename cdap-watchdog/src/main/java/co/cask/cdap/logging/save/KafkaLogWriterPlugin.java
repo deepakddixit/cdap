@@ -231,18 +231,19 @@ public class KafkaLogWriterPlugin extends AbstractKafkaLogProcessor {
         LOG.trace("In countDownLatch......");
       }
 
-      if (scheduledExecutor != null) {
-        LOG.trace("Before  scheduledExecutor.....");
-        scheduledExecutor.shutdown();
-        scheduledExecutor.awaitTermination(5, TimeUnit.MINUTES);
-        LOG.trace("After  scheduledExecutor.....");
-      }
 
       LOG.trace("Before logFileWriter flush()");
       logFileWriter.flush();
       LOG.trace("After logFileWriter flush()... ");
       logFileWriter.close();
       LOG.trace("After logFileWriter close()");
+
+      if (scheduledExecutor != null) {
+        LOG.trace("Before  scheduledExecutor.....");
+        scheduledExecutor.shutdown();
+        scheduledExecutor.awaitTermination(5, TimeUnit.MINUTES);
+        LOG.trace("After  scheduledExecutor.....");
+      }
 
     } catch (Exception e) {
       LOG.error("Caught exception while closing logWriter {}", e.getMessage(), e);

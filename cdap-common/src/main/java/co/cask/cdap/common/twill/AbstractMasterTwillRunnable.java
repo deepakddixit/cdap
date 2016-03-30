@@ -17,6 +17,7 @@
 package co.cask.cdap.common.twill;
 
 import co.cask.cdap.common.conf.CConfiguration;
+import co.cask.cdap.common.logging.RedirectedPrintStream;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
@@ -36,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.PrintStream;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -45,6 +47,11 @@ import java.util.concurrent.ExecutionException;
  */
 public abstract class AbstractMasterTwillRunnable extends AbstractTwillRunnable {
   private static final Logger LOG = LoggerFactory.getLogger(AbstractMasterTwillRunnable.class);
+
+  static {
+    System.setOut(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.out), true));
+    System.setErr(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.err), true));
+  }
 
   protected String name;
   private String cConfName;

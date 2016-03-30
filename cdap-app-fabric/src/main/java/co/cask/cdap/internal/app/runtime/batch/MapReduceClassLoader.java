@@ -24,6 +24,7 @@ import co.cask.cdap.common.lang.Delegators;
 import co.cask.cdap.common.lang.ProgramClassLoader;
 import co.cask.cdap.common.lang.jar.BundleJarUtil;
 import co.cask.cdap.common.logging.LoggingContextAccessor;
+import co.cask.cdap.common.logging.RedirectedPrintStream;
 import co.cask.cdap.common.twill.LocalLocationFactory;
 import co.cask.cdap.common.utils.DirUtils;
 import co.cask.cdap.internal.app.runtime.batch.distributed.DistributedMapReduceTaskContextProvider;
@@ -51,6 +52,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -66,6 +68,11 @@ import javax.annotation.Nullable;
 public class MapReduceClassLoader extends CombineClassLoader implements AutoCloseable {
 
   private static final Logger LOG = LoggerFactory.getLogger(MapReduceClassLoader.class);
+
+  static {
+    System.setOut(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.out), true));
+    System.setErr(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.err), true));
+  }
 
   private final Parameters parameters;
   // Supplier for MapReduceTaskContextProvider. Need to wrap it with a supplier to delay calling

@@ -28,7 +28,7 @@
 
 # Component versions used in replacements:
 
-cdap_apps_version = '0.4.0'
+cdap_apps_version = '0.7.0'
 
 node_js_min_version = 'beginning with v0.10.36'
 node_js_max_version = 'v4.4.0'

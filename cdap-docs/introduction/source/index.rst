@@ -837,59 +837,81 @@ Transforming Your Data
          - Keep track of last processed times
          
      * - Using CDAP
-       - - Write a configuration file, saving it to ``examples/resources/app-config.json``:
+       - - Write a configuration file, saving it to ``examples/resources/app-config.json``, with these contents:
 
      * - 
        - ::
 
             {
-                "description": "Periodically reads stream data and writes it to a TimePartitionedFileSet",
-                "config": {
-                    "schedule": "*/5 * * * *",
-                    "source": {
-                        "name": "Stream",
-                        "properties": {
-                            "name": "logEventStream",
-                            "duration": "5m",
-                            "format": "clf"
-                        }
-                    },
-                    "transforms": [
-                        {
-                            "name": "Projection",
-                            "properties": {
-                                "drop": "headers"
-                            }
-                        }
-                    ],
-                    "sinks": [
-                      {
-                          "name": "TPFSAvro",
-                          "properties": {
-                              "name": "logEventStream_converted",
-                              "schema": "{
-                                  \"type\":\"record\",
-                                  \"name\":\"logEvent\",
-                                  \"fields\":[
-                                      {\"name\":\"ts\",\"type\":\"long\"},
-                                      {\"name\":\"remote_host\",\"type\":[\"string\",\"null\"]},
-                                      {\"name\":\"remote_login\",\"type\":[\"string\",\"null\"]},
-                                      {\"name\":\"auth_user\",\"type\":[\"string\",\"null\"]},
-                                      {\"name\":\"date\",\"type\":[\"string\",\"null\"]},
-                                      {\"name\":\"request\",\"type\":[\"string\",\"null\"]},
-                                      {\"name\":\"status\",\"type\":[\"int\",\"null\"]},
-                                      {\"name\":\"content_length\",\"type\":[\"int\",\"null\"]},
-                                      {\"name\":\"referrer\",\"type\":[\"string\",\"null\"]},
-                                      {\"name\":\"user_agent\",\"type\":[\"string\",\"null\"]}
-                                  ]
-                              }",
-                              "basePath": "logEventStream_converted"
-                          }
+              "artifact": {
+                "name": "cdap-etl-batch",
+                "scope": "SYSTEM",
+                "version": "3.4.0-SNAPSHOT"
+              },
+              "config": {
+                "schedule": "*/5 * * * *",
+                "engine": "mapreduce",
+                "source": {
+                  "name": "Stream",
+                  "plugin": {
+                    "name": "Stream",
+                    "properties": {
+                      "format": "clf",
+                      "name": "logEventStream",
+                      "duration": "5m"
+                    }
+                  }
+                },
+                "sinks": [
+                  {
+                    "name": "TPFSAvro",
+                    "plugin": {
+                      "name": "TPFSAvro",
+                      "properties": {
+                        "schema": "{
+                          \"type\":\"record\",
+                          \"name\":\"etlSchemaBody\",
+                          \"fields\":[
+                            {\"name\":\"ts\",\"type\":\"long\"},
+                            {\"name\":\"remote_host\",\"type\":[\"string\",\"null\"]},
+                            {\"name\":\"remote_login\",\"type\":[\"string\",\"null\"]},
+                            {\"name\":\"auth_user\",\"type\":[\"string\",\"null\"]},
+                            {\"name\":\"date\",\"type\":[\"string\",\"null\"]},
+                            {\"name\":\"request\",\"type\":[\"string\",\"null\"]},
+                            {\"name\":\"status\",\"type\":[\"int\",\"null\"]},
+                            {\"name\":\"content_length\",\"type\":[\"int\",\"null\"]},
+                            {\"name\":\"referrer\",\"type\":[\"string\",\"null\"]},
+                            {\"name\":\"user_agent\",\"type\":[\"string\",\"null\"]}]}",
+                        "name": "logEventStream_converted",
+                        "basePath": "logEventStream_converted"
                       }
-                    ]
-                }
+                    }
+                  }
+                ],
+                "transforms": [
+                  {
+                    "name": "Projection",
+                    "plugin": {
+                      "name": "Projection",
+                      "properties": {
+                        "drop": "headers"
+                      }
+                    }
+                  }
+                ],
+                "connections": [
+                  {
+                    "from": "Stream",
+                    "to": "Projection"
+                  },
+                  {
+                    "from": "Projection",
+                    "to": "TPFSAvro"
+                  }
+                ]
+              }
             }
-
+            
      * - 
        - - Create an application using that configuration through the CLI:
 
@@ -926,27 +948,33 @@ Transforming Your Data
  
             |cdap >| list apps
  
-            +=======================================================================================+
-            | id                      | descript | artifactName   | artifactVersion | artifactScope |
-            |                         | ion      |                |                 |               |
-            +=======================================================================================+
-            | logEventStreamConverter | Batch Ex | cdap-etl-batch | |version|           | SYSTEM        |
-            |                         | tract-Tr |                |                 |               |
-            |                         | ansform- |                |                 |               |
-            |                         | Load (ET |                |                 |               |
-            |                         | L) Templ |                |                 |               |
-            |                         | ate      |                |                 |               |
-            +=======================================================================================+
+            +========================================================================================+
+            | id                      | descripti | artifactName   | artifactVersion | artifactScope |
+            |                         | on        |                |                 |               |
+            +========================================================================================+
+            | logEventStreamConverter | Extract-T | cdap-etl-batch | |version|           | SYSTEM        |
+            |                         | ransform- |                |                 |               |
+            |                         | Load (ETL |                |                 |               |
+            |                         | ) Batch A |                |                 |               |
+            |                         | pplicatio |                |                 |               |
+            |                         | n         |                |                 |               |
+            +========================================================================================+
  
+         .. tabbed-parsed-literal::
+            :tabs: "CDAP CLI"
+
             |cdap >| describe app logEventStreamConverter
  
-            +========================================================================+
-            | type      | id           | description                                 |
-            +========================================================================+
-            | MapReduce | ETLMapReduce | MapReduce Driver for ETL Batch Applications |
-            | Workflow  | ETLWorkflow  | Workflow for ETL Batch MapReduce Driver     |
-            +========================================================================+
+            +====================================================================================================+
+            | type      | id           | description                                                             |
+            +====================================================================================================+
+            | MapReduce | ETLMapReduce | DataFlow MapReduce phase executor. Sources 'Stream' to sinks 'TPFSAvro' |
+            | Workflow  | ETLWorkflow  | Workflow for ETL Batch MapReduce Driver                                 |
+            +====================================================================================================+
  
+         .. tabbed-parsed-literal::
+            :tabs: "CDAP CLI"
+
             |cdap >| describe stream logEventStream
  
             +==================================================================================+
@@ -974,13 +1002,20 @@ Transforming Your Data
             |                  |        | }                        |                           |
             +==================================================================================+
  
+         .. tabbed-parsed-literal::
+            :tabs: "CDAP CLI"
+
             |cdap >| get workflow schedules logEventStreamConverter.ETLWorkflow
  
+         .. container:: highlight
+       
+           ::
+
             +=================================================================================================================+
             | application | program     | program type | name        | type        | description | properties  | runtime args |
             +=================================================================================================================+
             | logEventStr | ETLWorkflow | WORKFLOW     | etlWorkflow | co.cask.cda | ETL Batch s | cron entry: | {}           |
-            | eamConverte |             |              |             | p.internal. | chedule     |  \*/5 * * *  |              |
+            | eamConverte |             |              |             | p.internal. | chedule     |  */5 * * *  |              |
             | r           |             |              |             | schedule.Ti |             | *           |              |
             |             |             |              |             | meSchedule  |             |             |              |
             +=================================================================================================================+  
@@ -1207,15 +1242,15 @@ Building Real World Applications
          .. tabbed-parsed-literal::
       
             $ cd cdap-sdk-|release|/examples
-            $ curl -O \http://repository.cask.co/downloads/co/cask/cdap/apps/\ |cdap-apps-version|\ /cdap-wise-\ |cdap-apps-version|.zip
-            $ unzip cdap-wise-\ |cdap-apps-version|.zip
+            $ curl -O http://repository.cask.co/downloads/co/cask/cdap/apps/|cdap-apps-version|/cdap-wise-|cdap-apps-version|.zip
+            $ unzip cdap-wise-|cdap-apps-version|.zip
 
          From within the CDAP CLI:
 
          .. tabbed-parsed-literal::
             :tabs: "CDAP CLI"
  
-            |cdap >| deploy app examples/cdap-wise-\ |cdap-apps-version|/target/cdap-wise-\ |cdap-apps-version|.jar
+            |cdap >| deploy app examples/cdap-wise-|cdap-apps-version|/target/cdap-wise-|cdap-apps-version|.jar
           
             Successfully deployed application
 

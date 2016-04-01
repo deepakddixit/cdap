@@ -37,10 +37,12 @@ jQuery(document).ready(function() {
     copyables[i].addEventListener('mouseup', function(e){
       var e = e || event // equalize event object between modern and older IE browsers
       var target = e.target || e.srcElement // get target element mouse is over
-      if (target.className != 'copyable-text' && target.parentNode.className == 'copyable-text') {
+      if (target.className != 'copyable-text' && target.parentNode.className.includes('copyable-text')) {
         target = target.parentNode;
+      } else if ($(this)[0].className.includes('copyable-text')) {
+        target = $(this)[0]
       }
-      if (target.className == 'copyable-text') {
+      if (target.className.includes('copyable-text')) {
         var copysuccess = copySelectionText()
         if (copysuccess) {
           showTooltip(e, 'Copied!');
@@ -52,10 +54,12 @@ jQuery(document).ready(function() {
     copyables[i].addEventListener('mouseover', function(e){
       var e = e || event // equalize event object between modern and older IE browsers
       var target = e.target || e.srcElement // get target element mouse is over
-      if (target.className != 'copyable-text' && target.parentNode.className == 'copyable-text') {
+      if (target.className != 'copyable-text' && target.parentNode.className.includes('copyable-text')) {
         target = target.parentNode;
+      } else if ($(this)[0].className.includes('copyable-text')) {
+        target = $(this)[0]
       }
-      if (target.className == 'copyable-text'){
+      if (target.className.includes('copyable-text')){
         selectElementText(target) // select the element's text we wish to read
         if (navigator.userAgent.indexOf('Safari') != -1 && 
               navigator.userAgent.indexOf('Chrome') == -1) {

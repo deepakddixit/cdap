@@ -840,79 +840,78 @@ Transforming Your Data
        - - Write a configuration file, saving it to ``examples/resources/app-config.json``, with these contents:
 
      * - 
-       - .. container:: copyable-text
+       - .. code:: json
+           :class: copyable copyable-text
        
-           ::
-
-              {
-                "artifact": {
-                  "name": "cdap-etl-batch",
-                  "scope": "SYSTEM",
-                  "version": "3.4.0-SNAPSHOT"
-                },
-                "config": {
-                  "schedule": "*/5 * * * *",
-                  "engine": "mapreduce",
-                  "source": {
-                    "name": "Stream",
-                    "plugin": {
-                      "name": "Stream",
-                      "properties": {
-                        "format": "clf",
-                        "name": "logEventStream",
-                        "duration": "5m"
-                      }
-                    }
-                  },
-                  "sinks": [
-                    {
-                      "name": "TPFSAvro",
-                      "plugin": {
-                        "name": "TPFSAvro",
-                        "properties": {
-                          "schema": "{
-                            \"type\":\"record\",
-                            \"name\":\"etlSchemaBody\",
-                            \"fields\":[
-                              {\"name\":\"ts\",\"type\":\"long\"},
-                              {\"name\":\"remote_host\",\"type\":[\"string\",\"null\"]},
-                              {\"name\":\"remote_login\",\"type\":[\"string\",\"null\"]},
-                              {\"name\":\"auth_user\",\"type\":[\"string\",\"null\"]},
-                              {\"name\":\"date\",\"type\":[\"string\",\"null\"]},
-                              {\"name\":\"request\",\"type\":[\"string\",\"null\"]},
-                              {\"name\":\"status\",\"type\":[\"int\",\"null\"]},
-                              {\"name\":\"content_length\",\"type\":[\"int\",\"null\"]},
-                              {\"name\":\"referrer\",\"type\":[\"string\",\"null\"]},
-                              {\"name\":\"user_agent\",\"type\":[\"string\",\"null\"]}]}",
-                          "name": "logEventStream_converted",
-                          "basePath": "logEventStream_converted"
-                        }
-                      }
-                    }
-                  ],
-                  "transforms": [
-                    {
-                      "name": "Projection",
-                      "plugin": {
-                        "name": "Projection",
-                        "properties": {
-                          "drop": "headers"
-                        }
-                      }
-                    }
-                  ],
-                  "connections": [
-                    {
-                      "from": "Stream",
-                      "to": "Projection"
-                    },
-                    {
-                      "from": "Projection",
-                      "to": "TPFSAvro"
-                    }
-                  ]
-                }
-              }
+           {
+             "artifact": {
+               "name": "cdap-etl-batch",
+               "scope": "SYSTEM",
+               "version": "3.4.0-SNAPSHOT"
+             },
+             "config": {
+               "schedule": "*/5 * * * *",
+               "engine": "mapreduce",
+               "source": {
+                 "name": "Stream",
+                 "plugin": {
+                   "name": "Stream",
+                   "properties": {
+                     "format": "clf",
+                     "name": "logEventStream",
+                     "duration": "5m"
+                   }
+                 }
+               },
+               "sinks": [
+                 {
+                   "name": "TPFSAvro",
+                   "plugin": {
+                     "name": "TPFSAvro",
+                     "properties": {
+                       "schema": "{
+                         \"type\":\"record\",
+                         \"name\":\"etlSchemaBody\",
+                         \"fields\":[
+                           {\"name\":\"ts\",\"type\":\"long\"},
+                           {\"name\":\"remote_host\",\"type\":[\"string\",\"null\"]},
+                           {\"name\":\"remote_login\",\"type\":[\"string\",\"null\"]},
+                           {\"name\":\"auth_user\",\"type\":[\"string\",\"null\"]},
+                           {\"name\":\"date\",\"type\":[\"string\",\"null\"]},
+                           {\"name\":\"request\",\"type\":[\"string\",\"null\"]},
+                           {\"name\":\"status\",\"type\":[\"int\",\"null\"]},
+                           {\"name\":\"content_length\",\"type\":[\"int\",\"null\"]},
+                           {\"name\":\"referrer\",\"type\":[\"string\",\"null\"]},
+                           {\"name\":\"user_agent\",\"type\":[\"string\",\"null\"]}]}",
+                       "name": "logEventStream_converted",
+                       "basePath": "logEventStream_converted"
+                     }
+                   }
+                 }
+               ],
+               "transforms": [
+                 {
+                   "name": "Projection",
+                   "plugin": {
+                     "name": "Projection",
+                     "properties": {
+                       "drop": "headers"
+                     }
+                   }
+                 }
+               ],
+               "connections": [
+                 {
+                   "from": "Stream",
+                   "to": "Projection"
+                 },
+                 {
+                   "from": "Projection",
+                   "to": "TPFSAvro"
+                 }
+               ]
+             }
+           }
             
      * - 
        - - Create an application using that configuration through the CLI:

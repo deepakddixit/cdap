@@ -36,7 +36,6 @@ import co.cask.cdap.common.guice.IOModule;
 import co.cask.cdap.common.guice.KafkaClientModule;
 import co.cask.cdap.common.guice.LocationRuntimeModule;
 import co.cask.cdap.common.guice.ZKClientModule;
-import co.cask.cdap.common.logging.RedirectedPrintStream;
 import co.cask.cdap.data.runtime.DataFabricModules;
 import co.cask.cdap.data.runtime.DataSetsModules;
 import co.cask.cdap.data.stream.StreamAdminModules;
@@ -105,7 +104,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.net.InetAddress;
 import java.security.Permission;
 import java.util.Arrays;
@@ -122,11 +120,6 @@ import javax.annotation.Nullable;
 public abstract class AbstractProgramTwillRunnable<T extends ProgramRunner> implements TwillRunnable {
 
   private static final Logger LOG = LoggerFactory.getLogger(AbstractProgramTwillRunnable.class);
-
-  static {
-    System.setOut(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.out), true));
-    System.setErr(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.err), true));
-  }
 
   private static final Gson GSON = new GsonBuilder()
     .registerTypeAdapter(Arguments.class, new ArgumentsCodec())

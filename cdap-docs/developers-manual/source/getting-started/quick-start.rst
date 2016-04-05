@@ -58,10 +58,21 @@ is already built and packaged:
     |$| curl -w'\\n' -O |http:|//repository.cask.co/downloads/co/cask/cdap/apps/|cdap-apps-version|/cdap-wise-|cdap-apps-version|.zip
     |$| unzip cdap-wise-|cdap-apps-version|.zip
 
+.. tabbed-parsed-literal::
+
+  $ cd cdap-sdk-|release|/examples
+  $ curl -O http://repository.cask.co/downloads/co/cask/cdap/apps/|cdap-apps-version|/cdap-wise-|cdap-apps-version|.zip
+  $ unzip cdap-wise-|cdap-apps-version|.zip
+
+            
 If you clone the source code from GitHub, you will need to build and package the
 artifact with these commands::
 
   $ git clone https://github.com/caskdata/cdap-apps
+  https://github.com/caskdata/cdap-apps/tree/release/cdap-3.3-compatible
+  
+  git clone https://github.com/caskdata/cdap-apps --branch release/cdap-3.3-compatible
+  
   $ cd cdap-apps/Wise
   $ mvn package -DskipTests
 
@@ -72,8 +83,8 @@ In both cases, the artifact is in the ``target/`` directory with the file name:
   .. parsed-literal::
     cdap-wise-|cdap-apps-version|.jar
 
-**Learn More:** *A detailed description of the application and its implementation is
-available in the* :ref:`Web Analytics Application documentation <examples-web-analytics>`.
+**Learn More:** A detailed description of the application and its implementation is
+available in the :ref:`Web Analytics Application documentation <examples-web-analytics>`.
 
 
 Deploying the Application

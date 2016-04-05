@@ -22,33 +22,54 @@
  * 
  */
 
-function changeExampleTab(example, mapping, tabID) {
+var cdapDocumentationTabsets = {};
+
+function changeExampleTab(example, mapping, tabID, tabSetID) {
   return function(e) {
     e.preventDefault();
     var scrollOffset = $(this).offset().top - $(document).scrollTop();
-    $(".dependent .tab-pane").removeClass("active");
-    $(".dependent .example-tab").removeClass("active");
+    $(".dependent-" + tabSetID + " .tab-pane").removeClass("active");
+    $(".dependent-" + tabSetID + " .example-tab").removeClass("active");
     if (example != mapping[example]) {
-      $('.dependent').not('#' + tabID).find('.tab-pane-'+ mapping[example]).addClass("active");
-      $('.dependent').not('#' + tabID).find('.example-tab-'+ mapping[example]).addClass("active");
+      $('.dependent-' + tabSetID).not('#' + tabID).find('.tab-pane-'+ mapping[example]).addClass("active");
+      $('.dependent-' + tabSetID).not('#' + tabID).find('.example-tab-'+ mapping[example]).addClass("active");
     }
-    $(".dependent .tab-pane-" + example).addClass("active");
-    $(".dependent .example-tab-" + example).addClass("active");
+    $(".dependent-" + tabSetID + " .tab-pane-" + example).addClass("active");
+    $(".dependent-" + tabSetID + " .example-tab-" + example).addClass("active");
     $(document).scrollTop($(this).offset().top - scrollOffset);
-    localStorage.setItem("cdap-documentation-tab", mapping[example]);
+    cdapDocumentationTabsets[tabSetID] = mapping[example];
+    localStorage.setItem("cdap-documentation-tabsets", JSON.stringify(cdapDocumentationTabsets));
   }
 }
 
 jQuery(document).ready(function() {
-  var example = localStorage.getItem("cdap-documentation-tab");
-  var tabs = $(".dependent .example-tab-" + example);
-  if (example && tabs) {
+   $(window).load(function() {
+    var example;
     try {
-      $(".dependent .example-tab-" + example)[0].click(changeExampleTab(example));
-    } catch (e) {
-      console.log("Unable to set using local storage: " + example);
+      var tabsets = $.parseJSON(localStorage.getItem("cdap-documentation-tabsets"));
+    } catch(e) {
+      console.log("Unable to set using local storage: bad JSON");
+      return;
     }
-  } else {
-    console.log("Unable to set using local storage: " + example);
-  }
+    if (tabsets) {
+      cdapDocumentationTabsets = tabsets;
+      for (var tabSetID in tabsets) {
+        if (tabsets.hasOwnProperty(tabSetID)) {
+          var tab = tabsets[tabSetID];
+          var tabs = $(".dependent-" + tabSetID + " .example-tab-" + tab);
+          if (tab && tabs) {
+            try {
+              tabs[0].click(changeExampleTab(tab));
+            } catch (e) {
+              console.log("Unable to set using local storage: " + tab);
+            }
+          } else {
+            console.log("Unable to set using local storage (no tabs): " + tab);
+          }
+        }
+      }
+    } else {
+      console.log("Unable to set using local storage (no tabsets)");  
+    }
+  });
 });

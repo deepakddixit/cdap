@@ -1,5 +1,5 @@
 /*
- * Copyright © 2014-2015 Cask Data, Inc.
+ * Copyright © 2014-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -189,6 +189,19 @@ public final class LoggingContextHelper {
       filterBuilder.add(namespaceFilter);
       filterBuilder.add(new MdcExpression(ApplicationLoggingContext.TAG_APPLICATION_ID, applId));
       filterBuilder.add(new MdcExpression(entityTag.getName(), entityTag.getValue()));
+
+      if (loggingContext instanceof WorkflowProgramLoggingContext) {
+        // Program is started by Workflow. Add Program information to filter.
+        Map<String, LoggingContext.SystemTag> systemTagsMap = loggingContext.getSystemTagsMap();
+        LoggingContext.SystemTag programTag = systemTagsMap.get(MapReduceLoggingContext.TAG_MAP_REDUCE_JOB_ID);
+        if (programTag != null) {
+          filterBuilder.add(new MdcExpression(MapReduceLoggingContext.TAG_MAP_REDUCE_JOB_ID, programTag.getValue()));
+        }
+        programTag = systemTagsMap.get(SparkLoggingContext.TAG_SPARK_JOB_ID);
+        if (programTag != null) {
+          filterBuilder.add(new MdcExpression(SparkLoggingContext.TAG_SPARK_JOB_ID, programTag.getValue()));
+        }
+      }
 
       // Add runid filter if required
       LoggingContext.SystemTag runId = loggingContext.getSystemTagsMap().get(ApplicationLoggingContext.TAG_RUNID_ID);

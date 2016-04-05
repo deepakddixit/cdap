@@ -65,16 +65,19 @@ is already built and packaged:
   $ unzip cdap-wise-|cdap-apps-version|.zip
 
             
-If you clone the source code from GitHub, you will need to build and package the
-artifact with these commands::
+If instead, you would like to clone the source code from GitHub, you can build and package
+the artifact with these commands::
 
-  $ git clone https://github.com/caskdata/cdap-apps
-  https://github.com/caskdata/cdap-apps/tree/release/cdap-3.3-compatible
-  
-  git clone https://github.com/caskdata/cdap-apps --branch release/cdap-3.3-compatible
-  
+  $ git clone https://github.com/caskdata/cdap-apps  
   $ cd cdap-apps/Wise
   $ mvn package -DskipTests
+
+.. tabbed-parsed-literal::
+
+  $ git clone https://github.com/caskdata/cdap-apps --branch |cdap-apps-compatibile-version|
+  $ cd cdap-apps/Wise
+  $ mvn package -DskipTests
+
 
 In both cases, the artifact is in the ``target/`` directory with the file name:
 

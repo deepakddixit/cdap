@@ -70,8 +70,10 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
   private static final Logger LOG = LoggerFactory.getLogger(MapReduceClassLoader.class);
 
   static {
-    System.setOut(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.out), true));
-    System.setErr(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.err), true));
+    System.setOut(new PrintStream(RedirectedPrintStream.
+      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stdout"), System.out), true));
+    System.setErr(new PrintStream(RedirectedPrintStream.
+      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stderr"), System.err), true));
   }
 
   private final Parameters parameters;

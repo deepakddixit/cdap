@@ -27,12 +27,14 @@ import co.cask.cdap.data2.metadata.lineage.Relation;
 import co.cask.cdap.data2.metadata.store.MetadataStore;
 import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.ProgramType;
+import co.cask.cdap.proto.id.NamespaceId;
 import co.cask.cdap.proto.metadata.MetadataRecord;
 import co.cask.cdap.proto.metadata.MetadataScope;
 import co.cask.tephra.TransactionExecutorFactory;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.twill.api.RunId;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -74,6 +76,11 @@ public class LineageAdminTest extends MetadataTestBase {
 
   private final Id.Program program5 = Id.Program.from("default", "app5", ProgramType.SERVICE, "service5");
   private final Id.Run run5 = new Id.Run(program5, RunIds.generate(700).getId());
+
+  @After
+  public void cleanup() throws Exception {
+    deleteNamespace(NamespaceId.DEFAULT.getNamespace());
+  }
 
   @Test
   public void testSimpleLineage() throws Exception {
@@ -248,9 +255,9 @@ public class LineageAdminTest extends MetadataTestBase {
 
     Lineage expectedLineage = new Lineage(
       ImmutableSet.of(
-        new Relation(dataset1, program1, AccessType.READ, twillRunId(run1), toSet(flowlet1)),
-        new Relation(dataset1, program1, AccessType.WRITE, twillRunId(run1), toSet(flowlet1))
-      )
+        new Relation(dataset1, program1, AccessType.WRITE, twillRunId(run1), toSet(flowlet1)),
+        new Relation(dataset1, program1, AccessType.READ, twillRunId(run1), toSet(flowlet1))
+        )
     );
 
     Assert.assertEquals(expectedLineage, lineageAdmin.computeLineage(dataset1, 500, 20000, 100));

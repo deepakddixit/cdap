@@ -17,12 +17,15 @@
 package co.cask.cdap.data2.metadata.store;
 
 import co.cask.cdap.api.dataset.DatasetDefinition;
+import co.cask.cdap.api.dataset.DatasetManagementException;
 import co.cask.cdap.api.dataset.DatasetProperties;
 import co.cask.cdap.api.dataset.lib.IndexedTableDefinition;
 import co.cask.cdap.data.runtime.DataSetsModules;
+import co.cask.cdap.data2.audit.AuditPublisher;
+import co.cask.cdap.data2.audit.AuditPublishers;
+import co.cask.cdap.data2.audit.payload.builder.MetadataPayloadBuilder;
 import co.cask.cdap.data2.datafabric.dataset.DatasetsUtil;
 import co.cask.cdap.data2.dataset2.DatasetFramework;
-import co.cask.cdap.data2.dataset2.DatasetManagementException;
 import co.cask.cdap.data2.metadata.dataset.Metadata;
 import co.cask.cdap.data2.metadata.dataset.MetadataDataset;
 import co.cask.cdap.data2.metadata.dataset.MetadataEntry;
@@ -30,6 +33,7 @@ import co.cask.cdap.data2.metadata.indexer.Indexer;
 import co.cask.cdap.data2.metadata.publisher.MetadataChangePublisher;
 import co.cask.cdap.data2.transaction.Transactions;
 import co.cask.cdap.proto.Id;
+import co.cask.cdap.proto.audit.AuditType;
 import co.cask.cdap.proto.metadata.MetadataChangeRecord;
 import co.cask.cdap.proto.metadata.MetadataRecord;
 import co.cask.cdap.proto.metadata.MetadataScope;
@@ -84,6 +88,7 @@ public class DefaultMetadataStore implements MetadataStore {
   private final TransactionExecutorFactory txExecutorFactory;
   private final DatasetFramework dsFramework;
   private final MetadataChangePublisher changePublisher;
+  private AuditPublisher auditPublisher;
 
   @Inject
   DefaultMetadataStore(TransactionExecutorFactory txExecutorFactory,
@@ -92,6 +97,13 @@ public class DefaultMetadataStore implements MetadataStore {
     this.txExecutorFactory = txExecutorFactory;
     this.dsFramework = dsFramework;
     this.changePublisher = changePublisher;
+  }
+
+
+  @SuppressWarnings("unused")
+  @Inject(optional = true)
+  public void setAuditPublisher(AuditPublisher auditPublisher) {
+    this.auditPublisher = auditPublisher;
   }
 
   @Override
@@ -348,34 +360,34 @@ public class DefaultMetadataStore implements MetadataStore {
 
   @Override
   public Set<MetadataSearchResultRecord> searchMetadata(MetadataScope scope, String namespaceId, String searchQuery) {
-    return searchMetadataOnType(scope, namespaceId, searchQuery, MetadataSearchTargetType.ALL);
+    return searchMetadataOnType(scope, namespaceId, searchQuery, ImmutableSet.of(MetadataSearchTargetType.ALL));
   }
 
   @Override
   public Set<MetadataSearchResultRecord> searchMetadataOnType(String namespaceId, String searchQuery,
-                                                              MetadataSearchTargetType type) {
+                                                              Set<MetadataSearchTargetType> types) {
     return ImmutableSet.<MetadataSearchResultRecord>builder()
-      .addAll(searchMetadataOnType(MetadataScope.USER, namespaceId, searchQuery, type))
-      .addAll(searchMetadataOnType(MetadataScope.SYSTEM, namespaceId, searchQuery, type))
+      .addAll(searchMetadataOnType(MetadataScope.USER, namespaceId, searchQuery, types))
+      .addAll(searchMetadataOnType(MetadataScope.SYSTEM, namespaceId, searchQuery, types))
       .build();
   }
 
   @Override
   public Set<MetadataSearchResultRecord> searchMetadataOnType(final MetadataScope scope, final String namespaceId,
                                                               final String searchQuery,
-                                                              final MetadataSearchTargetType type) {
+                                                              final Set<MetadataSearchTargetType> types) {
     // Execute search query
-    Iterable<MetadataEntry> metadataEntries = execute(new TransactionExecutor.Function<MetadataDataset,
+    Iterable<MetadataEntry> results = execute(new TransactionExecutor.Function<MetadataDataset,
       Iterable<MetadataEntry>>() {
       @Override
       public Iterable<MetadataEntry> apply(MetadataDataset input) throws Exception {
-        return input.search(namespaceId, searchQuery, type);
+        return input.search(namespaceId, searchQuery, types);
       }
     }, scope);
 
     // Score results
-    Map<Id.NamespacedId, Integer> weightedResults = new HashMap<>();
-    for (MetadataEntry metadataEntry : metadataEntries) {
+    final Map<Id.NamespacedId, Integer> weightedResults = new HashMap<>();
+    for (MetadataEntry metadataEntry : results) {
       Integer score = weightedResults.get(metadataEntry.getTargetId());
       score = score == null ? 0 : score;
       weightedResults.put(metadataEntry.getTargetId(), score + 1);
@@ -385,9 +397,52 @@ public class DefaultMetadataStore implements MetadataStore {
     List<Map.Entry<Id.NamespacedId, Integer>> resultList = new ArrayList<>(weightedResults.entrySet());
     Collections.sort(resultList, SEARCH_RESULT_DESC_SCORE_COMPARATOR);
 
+    // Fetch metadata for entities in the result list
+    // Note: since the fetch is happening in a different transaction, the metadata for entities may have been
+    // removed. It is okay not to have metadata for some results in case this happens.
+    Map<Id.NamespacedId, Metadata> systemMetadata = fetchMetadata(weightedResults.keySet(), MetadataScope.SYSTEM);
+    Map<Id.NamespacedId, Metadata> userMetadata = fetchMetadata(weightedResults.keySet(), MetadataScope.USER);
+
+    return addMetadataToResults(resultList, systemMetadata, userMetadata);
+  }
+
+  private Map<Id.NamespacedId, Metadata> fetchMetadata(final Set<Id.NamespacedId> entityIds, MetadataScope scope) {
+    Set<Metadata> metadataSet =
+      execute(new TransactionExecutor.Function<MetadataDataset, Set<Metadata>>() {
+        @Override
+        public Set<Metadata> apply(MetadataDataset input) throws Exception {
+          return input.getMetadata(entityIds);
+        }
+      }, scope);
+    Map<Id.NamespacedId, Metadata> metadataMap = new HashMap<>();
+    for (Metadata m : metadataSet) {
+      metadataMap.put(m.getEntityId(), m);
+    }
+    return metadataMap;
+  }
+
+  Set<MetadataSearchResultRecord> addMetadataToResults(List<Map.Entry<Id.NamespacedId, Integer>> results,
+                                                       Map<Id.NamespacedId, Metadata> systemMetadata,
+                                                       Map<Id.NamespacedId, Metadata> userMetadata) {
     Set<MetadataSearchResultRecord> result = new LinkedHashSet<>();
-    for (Map.Entry<Id.NamespacedId, Integer> entry : resultList) {
-      result.add(new MetadataSearchResultRecord(entry.getKey()));
+    for (Map.Entry<Id.NamespacedId, Integer> entry : results) {
+      ImmutableMap.Builder<MetadataScope, co.cask.cdap.proto.metadata.Metadata> builder = ImmutableMap.builder();
+      // Add system metadata
+      Metadata metadata = systemMetadata.get(entry.getKey());
+      if (metadata != null) {
+        builder.put(MetadataScope.SYSTEM,
+                    new co.cask.cdap.proto.metadata.Metadata(metadata.getProperties(), metadata.getTags()));
+      }
+
+      // Add user metadata
+      metadata = userMetadata.get(entry.getKey());
+      if (metadata != null) {
+        builder.put(MetadataScope.USER,
+                    new co.cask.cdap.proto.metadata.Metadata(metadata.getProperties(), metadata.getTags()));
+      }
+
+      // Create result
+      result.add(new MetadataSearchResultRecord(entry.getKey(), builder.build()));
     }
     return result;
   }
@@ -423,6 +478,16 @@ public class DefaultMetadataStore implements MetadataStore {
     MetadataChangeRecord.MetadataDiffRecord diff = new MetadataChangeRecord.MetadataDiffRecord(additions, deletions);
     MetadataChangeRecord changeRecord = new MetadataChangeRecord(previous, diff, System.currentTimeMillis());
     changePublisher.publish(changeRecord);
+
+    publishAudit(previous, additions, deletions);
+  }
+
+  private void publishAudit(MetadataRecord previous, MetadataRecord additions, MetadataRecord deletions) {
+    MetadataPayloadBuilder builder = new MetadataPayloadBuilder();
+    builder.addPrevious(previous);
+    builder.addAdditions(additions);
+    builder.addDeletions(deletions);
+    AuditPublishers.publishAudit(auditPublisher, previous.getEntityId(), AuditType.METADATA_CHANGE, builder.build());
   }
 
   private <T> T execute(TransactionExecutor.Function<MetadataDataset, T> func, MetadataScope scope) {
@@ -432,9 +497,9 @@ public class DefaultMetadataStore implements MetadataStore {
   }
 
   private void execute(TransactionExecutor.Procedure<MetadataDataset> func, MetadataScope scope) {
-    MetadataDataset metadataScope = newMetadataDataset(scope);
-    TransactionExecutor txExecutor = Transactions.createTransactionExecutor(txExecutorFactory, metadataScope);
-    txExecutor.executeUnchecked(func, metadataScope);
+    MetadataDataset metadataDataset = newMetadataDataset(scope);
+    TransactionExecutor txExecutor = Transactions.createTransactionExecutor(txExecutorFactory, metadataDataset);
+    txExecutor.executeUnchecked(func, metadataDataset);
   }
 
   private MetadataDataset newMetadataDataset(MetadataScope scope) {

@@ -16,11 +16,7 @@
 
 <div class="tracker-content">
   <div class="tracker-banner">
-    <div class="tracker-title">
-      <h1>
-        CASK Tracker
-      </h1>
-    </div>
+    <div class="tracker-title"></div>
     <p class="text-right">
       Powered by <span>CDAP</span>
     </p>
@@ -28,7 +24,10 @@
 
   <div class="tracker-search">
     <div class="form-group has-feedback" ng-keypress="MainController.search($event)">
-      <input type="text" class="form-control" ng-model="MainController.searchQuery">
+      <input type="text"
+             class="form-control"
+             ng-model="MainController.searchQuery"
+             pattern="^(?![*]).*$">
       <span class="fa fa-search form-control-feedback"></span>
     </div>
 

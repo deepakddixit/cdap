@@ -38,6 +38,7 @@ public enum ArgumentName {
   DATASET_TYPE("dataset-type"),
   DATASET_MODULE("dataset-module"),
   DATASET_PROPERTIES("dataset-properties"),
+  DATASET_DESCRIPTON("dataset-description"),
   NEW_DATASET_MODULE("new-dataset-module"),
   DATASET("dataset-name"),
   NEW_DATASET("new-dataset-name"),
@@ -106,7 +107,14 @@ public enum ArgumentName {
    */
   SEARCH_QUERY("search-query"),
   TARGET_TYPE("target-type"),
-  METADATA_SCOPE("scope");
+  METADATA_SCOPE("scope"),
+
+  /**
+   * Authorization
+   */
+  PRINCIPAL_TYPE("principal-type"),
+  PRINCIPAL_NAME("principal-name"),
+  ROLE_NAME("role-name");
 
   private final String name;
 

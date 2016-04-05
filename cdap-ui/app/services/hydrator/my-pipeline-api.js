@@ -19,10 +19,12 @@ angular.module(PKG.name + '.services')
     var templatePath = '/templates',
         pipelinePath = '/namespaces/:namespace/apps/:pipeline',
 
-        listPath = '/namespaces/:namespace/apps?artifactName=' + GLOBALS.etlBatch + ',' + GLOBALS.etlRealtime,
-
-        pluginFetchBase = '/namespaces/:namespace/artifacts/:pipelineType/versions/:version/extensions/:extensionType',
+        listPath = '/namespaces/:namespace/apps?artifactName=' + GLOBALS.etlBatch + ',' + GLOBALS.etlRealtime + ',' + GLOBALS.etlDataPipeline,
+        artifactsPath = '/namespaces/:namespace/artifacts?scope=SYSTEM',
+        extensionsFetchBase = '/namespaces/:namespace/artifacts/:pipelineType/versions/:version/extensions',
+        pluginFetchBase = extensionsFetchBase + '/:extensionType',
         pluginsFetchPath = pluginFetchBase + '?scope=system',
+        extensionsFetchPath = extensionsFetchBase + '?scope=system',
         pluginDetailFetch = pluginFetchBase + '/plugins/:pluginName?scope=system',
         artifactPropertiesPath = '/namespaces/:namespace/artifacts/:artifactName/versions/:artifactVersion/properties';
 
@@ -34,10 +36,12 @@ angular.module(PKG.name + '.services')
       },
       {
         save: myHelpers.getConfig('PUT', 'REQUEST', pipelinePath, false, {contentType: 'application/json'}),
-        fetchTemplates: myHelpers.getConfig('GET', 'REQUEST', templatePath, true),
+        fetchArtifacts: myHelpers.getConfig('GET', 'REQUEST', artifactsPath, true),
+        fetchExtensions: myHelpers.getConfig('GET', 'REQUEST', extensionsFetchPath, true),
         fetchSources: myHelpers.getConfig('GET', 'REQUEST', pluginsFetchPath, true),
         fetchSinks: myHelpers.getConfig('GET', 'REQUEST', pluginsFetchPath, true),
         fetchTransforms: myHelpers.getConfig('GET', 'REQUEST', pluginsFetchPath, true),
+        fetchTemplates: myHelpers.getConfig('GET', 'REQUEST', templatePath, true),
         fetchPlugins: myHelpers.getConfig('GET', 'REQUEST', pluginsFetchPath, true),
         fetchSourceProperties: myHelpers.getConfig('GET', 'REQUEST', pluginDetailFetch, true),
         fetchSinkProperties: myHelpers.getConfig('GET', 'REQUEST', pluginDetailFetch, true),

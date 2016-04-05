@@ -160,6 +160,7 @@ gulp.task('js:lib', function() {
     ], mainBowerFiles({
         filter: /cask\-angular\-[^\/]+\/.*\.js$/
     })))
+    .pipe(plug.replace('glyphicon', 'fa'))
     .pipe(plug.concat('lib.js'))
     .pipe(gulp.dest('./dist/assets/bundle'));
 });
@@ -187,6 +188,7 @@ function getEs6Features(isNegate) {
     'search',
     'pins',
     'hydrator',
+    'hydratorplusplus',
     'tracker'
   ];
   var returnVal = [];
@@ -201,7 +203,12 @@ function getEs6Features(isNegate) {
 
 function getEs6Directives(isNegate) {
   var es6directives = [
-    (isNegate ? '!' : '') + './app/directives/dag/**/*.js'
+    (isNegate ? '!' : '') + './app/directives/dag/**/*.js',
+    (isNegate ? '!' : '') + './app/directives/dag-plus/**/*.js',
+    (isNegate ? '!' : '') + './app/directives/plugin-templates/**/*.js',
+    (isNegate ? '!' : '') + './app/directives/my-global-navbar/*.js',
+    (isNegate ? '!' : '') + './app/directives/datetime-picker/*.js',
+    (isNegate ? '!' : '') + './app/directives/datetime-range/*.js'
   ];
 
   return es6directives;
@@ -473,23 +480,36 @@ gulp.task('watch', ['jshint', 'watch:build'], function() {
     './app/**/*.js',
     '!./app/features/workflows/**/*.js',
     '!./app/features/hydrator/**/*.js',
+    '!./app/features/hydratorplusplus/**/*.js',
     '!./app/features/apps/**/*.js',
     '!./app/features/search/**/*.js',
     '!./app/features/pins/**/*.js',
     '!./app/features/flows/**/*.js',
     '!./app/directives/dag/**/*.js',
+    '!./app/directives/dag-plus/**/*.js',
+    '!./app/directives/plugin-templates/**/*.js',
+    '!./app/features/tracker/**/*.js',
+    '!./app/directives/my-global-navbar/**/*.js',
+    '!./app/directives/datetime-picker/*.js',
+    '!./app/directives/datetime-range/*.js',
     '!./app/**/*-test.js'
   ], ['jshint', 'watch:js:app']);
   gulp.watch([
     './app/features/workflows/**/*.js',
     './app/features/hydrator/**/*.js',
+    './app/features/hydratorplusplus/**/*.js',
     './app/features/apps/**/*.js',
     './app/features/pins/**/*.js',
     './app/features/search/**/*.js',
     './app/features/flows/**/*.js',
     './app/features/flows/**/*.js',
     './app/directives/dag/**/*.js',
-    './app/features/tracker/**/*.js'
+    './app/directives/dag-plus/**/*.js',
+    './app/directives/plugin-templates/**/*.js',
+    './app/features/tracker/**/*.js',
+    './app/directives/my-global-navbar/**/*.js',
+    './app/directives/datetime-picker/*.js',
+    './app/directives/datetime-range/*.js'
   ], ['jshint', 'watch:js:app:babel']);
 
   gulp.watch('./app/**/*.{less,css}', ['css']);

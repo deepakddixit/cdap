@@ -30,6 +30,7 @@ import co.cask.cdap.proto.metadata.MetadataRecord;
 import co.cask.cdap.proto.metadata.MetadataScope;
 import co.cask.cdap.proto.metadata.MetadataSearchResultRecord;
 import co.cask.cdap.proto.metadata.MetadataSearchTargetType;
+import co.cask.cdap.proto.metadata.lineage.CollapseType;
 import co.cask.cdap.proto.metadata.lineage.LineageRecord;
 import com.google.common.collect.Iterators;
 import org.apache.twill.discovery.Discoverable;
@@ -442,8 +443,9 @@ public abstract class MetadataTestBase extends AppFabricTestBase {
   }
 
   protected Set<MetadataSearchResultRecord> searchMetadata(Id.Namespace namespaceId, String query,
-                                                           @Nullable MetadataSearchTargetType target) throws Exception {
-    return metadataClient.searchMetadata(namespaceId, query, target);
+                                                           Set<MetadataSearchTargetType> targets)
+    throws Exception {
+    return metadataClient.searchMetadata(namespaceId, query, targets);
   }
 
   protected Set<String> getTags(Id.Application app, MetadataScope scope) throws Exception {
@@ -541,6 +543,11 @@ public abstract class MetadataTestBase extends AppFabricTestBase {
     return lineageClient.getLineage(datasetInstance, start, end, levels);
   }
 
+  protected LineageRecord fetchLineage(Id.DatasetInstance datasetInstance, long start, long end,
+                                       Set<CollapseType> collapseTypes, int levels) throws Exception {
+    return lineageClient.getLineage(datasetInstance, start, end, collapseTypes, levels);
+  }
+
   protected LineageRecord fetchLineage(Id.DatasetInstance datasetInstance, String start, String end,
                                        int levels) throws Exception {
     return lineageClient.getLineage(datasetInstance, start, end, levels);
@@ -552,6 +559,11 @@ public abstract class MetadataTestBase extends AppFabricTestBase {
 
   protected LineageRecord fetchLineage(Id.Stream stream, String start, String end, int levels) throws Exception {
     return lineageClient.getLineage(stream, start, end, levels);
+  }
+
+  protected LineageRecord fetchLineage(Id.Stream stream, long start, long end, Set<CollapseType> collapseTypes,
+                                       int levels) throws Exception {
+    return lineageClient.getLineage(stream, start, end, collapseTypes, levels);
   }
 
   protected Set<MetadataRecord> fetchRunMetadata(Id.Run run) throws Exception {

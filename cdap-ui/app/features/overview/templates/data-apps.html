@@ -117,7 +117,9 @@
       </div>
 
       <ul class="list-group">
-        <li class="list-group-item" ng-repeat="app in AppsSectionCtrl.apps | orderBy:AppsSectionCtrl.MyOrderings.appOrdering | limitTo:5">
+        <li class="list-group-item"
+            ng-repeat="app in AppsSectionCtrl.apps | orderBy:AppsSectionCtrl.MyOrderings.appOrdering | limitTo:5"
+            ng-if="!app.name.startsWith('_')">
           <a ui-sref="apps.detail.overview.programs({appId: app.id})"
               ng-if="AppsSectionCtrl.myHydratorFactory.isCustomApp(app.artifact.name)"
               ng-click="AppsSectionCtrl.MyOrderings.appClicked(app.id)">
@@ -132,7 +134,7 @@
               ng-click="AppsSectionCtrl.MyOrderings.appClicked(app.id)">
             <p ng-bind="app.name"> </p>
             <div class="title-type-image">
-              <span ng-if="AppsSectionCtrl.GLOBALS.etlBatch === app.artifact.name">
+              <span ng-if="AppsSectionCtrl.GLOBALS.etlBatchPipelines.indexOf(app.artifact.name) !== -1">
                 <span class="icon-ETLBatch"></span>
                 <span>ETL Batch</span>
               </span>

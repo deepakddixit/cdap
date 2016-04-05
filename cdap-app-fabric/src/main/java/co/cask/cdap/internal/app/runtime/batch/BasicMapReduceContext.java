@@ -1,5 +1,5 @@
 /*
- * Copyright © 2014-2015 Cask Data, Inc.
+ * Copyright © 2014-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -17,6 +17,7 @@
 package co.cask.cdap.internal.app.runtime.batch;
 
 import co.cask.cdap.api.Resources;
+import co.cask.cdap.api.data.batch.Input;
 import co.cask.cdap.api.data.batch.InputFormatProvider;
 import co.cask.cdap.api.data.batch.OutputFormatProvider;
 import co.cask.cdap.api.data.batch.Split;
@@ -27,8 +28,8 @@ import co.cask.cdap.api.mapreduce.MapReduceSpecification;
 import co.cask.cdap.api.metrics.Metrics;
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.api.metrics.MetricsContext;
+import co.cask.cdap.api.metrics.MultiMetricsContext;
 import co.cask.cdap.api.plugin.Plugin;
-import co.cask.cdap.api.workflow.WorkflowToken;
 import co.cask.cdap.app.metrics.ProgramUserMetrics;
 import co.cask.cdap.app.program.Program;
 import co.cask.cdap.app.runtime.Arguments;
@@ -36,12 +37,16 @@ import co.cask.cdap.common.conf.Constants;
 import co.cask.cdap.common.logging.LoggingContext;
 import co.cask.cdap.data.stream.StreamInputFormatProvider;
 import co.cask.cdap.data2.dataset2.DatasetFramework;
+import co.cask.cdap.data2.metadata.lineage.AccessType;
 import co.cask.cdap.data2.transaction.stream.StreamAdmin;
 import co.cask.cdap.internal.app.runtime.AbstractContext;
 import co.cask.cdap.internal.app.runtime.batch.dataset.DatasetInputFormatProvider;
 import co.cask.cdap.internal.app.runtime.batch.dataset.DatasetOutputFormatProvider;
+import co.cask.cdap.internal.app.runtime.batch.dataset.input.MapperInput;
 import co.cask.cdap.internal.app.runtime.distributed.LocalizeResource;
 import co.cask.cdap.internal.app.runtime.plugin.PluginInstantiator;
+import co.cask.cdap.internal.app.runtime.workflow.BasicWorkflowToken;
+import co.cask.cdap.internal.app.runtime.workflow.WorkflowProgramInfo;
 import co.cask.cdap.logging.context.MapReduceLoggingContext;
 import co.cask.cdap.proto.Id;
 import co.cask.tephra.TransactionContext;
@@ -49,6 +54,7 @@ import co.cask.tephra.TransactionSystemClient;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.twill.api.RunId;
 import org.apache.twill.discovery.DiscoveryServiceClient;
 
@@ -67,9 +73,7 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
 
   private final MapReduceSpecification spec;
   private final LoggingContext loggingContext;
-  private final long logicalStartTime;
-  private final String programNameInWorkflow;
-  private final WorkflowToken workflowToken;
+  private final WorkflowProgramInfo workflowProgramInfo;
   private final Metrics userMetrics;
   private final Map<String, Plugin> plugins;
   private final Map<String, OutputFormatProvider> outputFormatProviders;
@@ -78,8 +82,8 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
   private final File pluginArchive;
   private final Map<String, LocalizeResource> resourcesToLocalize;
 
-  private InputFormatProvider inputFormatProvider;
-
+  // key is input name, value is the MapperInput (configuration info) for that input
+  private Map<String, MapperInput> inputs;
   private Job job;
   private Resources mapperResources;
   private Resources reducerResources;
@@ -88,9 +92,7 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
                                RunId runId,
                                Arguments runtimeArguments,
                                MapReduceSpecification spec,
-                               long logicalStartTime,
-                               @Nullable String programNameInWorkflow,
-                               @Nullable WorkflowToken workflowToken,
+                               @Nullable WorkflowProgramInfo workflowProgramInfo,
                                DiscoveryServiceClient discoveryServiceClient,
                                MetricsCollectionService metricsCollectionService,
                                TransactionSystemClient txClient,
@@ -99,33 +101,30 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
                                @Nullable File pluginArchive,
                                @Nullable PluginInstantiator pluginInstantiator) {
     super(program, runId, runtimeArguments, Collections.<String>emptySet(),
-          getMetricsCollector(program, runId.getId(), metricsCollectionService),
+          createMetricsContext(program, runId.getId(), metricsCollectionService, workflowProgramInfo),
           dsFramework, txClient, discoveryServiceClient, false, pluginInstantiator);
-    this.logicalStartTime = logicalStartTime;
-    this.programNameInWorkflow = programNameInWorkflow;
-    this.workflowToken = workflowToken;
-
-    if (metricsCollectionService != null) {
-      this.userMetrics = new ProgramUserMetrics(getProgramMetrics());
-    } else {
-      this.userMetrics = null;
-    }
+    this.workflowProgramInfo = workflowProgramInfo;
+    this.userMetrics = new ProgramUserMetrics(getProgramMetrics());
     this.loggingContext = createLoggingContext(program.getId(), runId);
     this.spec = spec;
     this.mapperResources = spec.getMapperResources();
     this.reducerResources = spec.getReducerResources();
-    this.outputFormatProviders = new HashMap<>();
-
-    String outputDataSetName = spec.getOutputDataSet();
-    if (outputDataSetName != null) {
-      setOutput(outputDataSetName);
-    }
 
     this.plugins = Maps.newHashMap(program.getApplicationSpecification().getPlugins());
     this.txContext = getDatasetCache().newTransactionContext();
     this.streamAdmin = streamAdmin;
     this.pluginArchive = pluginArchive;
     this.resourcesToLocalize = new HashMap<>();
+
+    this.inputs = new HashMap<>();
+    this.outputFormatProviders = new HashMap<>();
+
+    if (spec.getInputDataSet() != null) {
+      addInput(Input.ofDataset(spec.getInputDataSet()));
+    }
+    if (spec.getOutputDataSet() != null) {
+      setOutput(spec.getOutputDataSet());
+    }
   }
 
   public TransactionContext getTransactionContext() {
@@ -152,26 +151,13 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     return spec;
   }
 
-  @Override
-  public long getLogicalStartTime() {
-    return logicalStartTime;
-  }
-
-  /**
-   * Returns the name of the Batch job when running inside workflow. Otherwise, return null.
-   */
-  @Nullable
-  public String getProgramNameInWorkflow() {
-    return programNameInWorkflow;
-  }
-
   /**
    * Returns the WorkflowToken if the MapReduce program is executed as a part of the Workflow.
    */
   @Override
   @Nullable
-  public WorkflowToken getWorkflowToken() {
-    return workflowToken;
+  public BasicWorkflowToken getWorkflowToken() {
+    return workflowProgramInfo == null ? null : workflowProgramInfo.getWorkflowToken();
   }
 
   public void setJob(Job job) {
@@ -194,6 +180,7 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     setInput(datasetName, ImmutableMap.<String, String>of());
   }
 
+  @Override
   public void setInput(String datasetName, Map<String, String> arguments) {
     setInput(createInputFormatProvider(datasetName, arguments, null));
   }
@@ -216,7 +203,45 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
 
   @Override
   public void setInput(InputFormatProvider inputFormatProvider) {
-    this.inputFormatProvider = inputFormatProvider;
+    // with the setInput method, only 1 input will be set, and so the name does not matter much.
+    // make it immutable to prevent calls to addInput after setting a single input.
+    inputs = ImmutableMap.of(inputFormatProvider.getInputFormatClassName(), new MapperInput(inputFormatProvider));
+  }
+
+  @Override
+  public void addInput(Input input) {
+    addInput(input, null);
+  }
+
+  @SuppressWarnings("unchecked")
+  private void addInput(String inputName, InputFormatProvider inputFormatProvider, @Nullable Class<?> mapperClass) {
+    // prevent calls to addInput after setting a single input.
+    if (inputs instanceof ImmutableMap) {
+      throw new IllegalStateException("Can not add inputs after setting a single input.");
+    }
+
+    if (mapperClass != null && !Mapper.class.isAssignableFrom(mapperClass)) {
+      throw new IllegalArgumentException("Specified mapper class must extend Mapper.");
+    }
+    inputs.put(inputName, new MapperInput(inputFormatProvider, (Class<? extends Mapper>) mapperClass));
+  }
+
+  @Override
+  public void addInput(Input input, @Nullable Class<?> mapperCls) {
+    if (input instanceof Input.DatasetInput) {
+      Input.DatasetInput datasetInput = (Input.DatasetInput) input;
+      // the createInput method call will translate the input name from stream uri to the stream's name
+      // see the implementation of createInput for more information on the hack
+      Input.InputFormatProviderInput createdInput = createInput(datasetInput);
+      addInput(createdInput.getAlias(), createdInput.getInputFormatProvider(), mapperCls);
+    } else if (input instanceof Input.StreamInput) {
+      StreamBatchReadable streamBatchReadable = ((Input.StreamInput) input).getStreamBatchReadable();
+      addInput(input.getAlias(),
+               new StreamInputFormatProvider(getProgram().getId().getNamespace(), streamBatchReadable, streamAdmin),
+               mapperCls);
+    } else if (input instanceof Input.InputFormatProviderInput) {
+      addInput(input.getAlias(), ((Input.InputFormatProviderInput) input).getInputFormatProvider(), mapperCls);
+    }
   }
 
   @Override
@@ -242,10 +267,11 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
   @Override
   public void addOutput(String datasetName, Map<String, String> arguments) {
     // we can delay the instantiation of the Dataset to later, but for now, we still have to maintain backwards
-    // compatability for the #setOutput(String, Dataset) method, so delaying the instantiation of this dataset will
+    // compatibility for the #setOutput(String, Dataset) method, so delaying the instantiation of this dataset will
     // bring about code complexity without much benefit. Once #setOutput(String, Dataset) is removed, we can postpone
     // this dataset instantiation
-    addOutput(datasetName, new DatasetOutputFormatProvider(datasetName, arguments, getDataset(datasetName, arguments),
+    addOutput(datasetName, new DatasetOutputFormatProvider(datasetName, arguments,
+                                                           getDataset(datasetName, arguments, AccessType.WRITE),
                                                            MapReduceBatchWritableOutputFormat.class));
   }
 
@@ -259,11 +285,20 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
   }
 
   /**
+   * Gets the MapperInputs for this MapReduce job.
+   *
+   * @return a mapping from input name to the MapperInputs for that input
+   */
+  Map<String, MapperInput> getMapperInputs() {
+    return ImmutableMap.copyOf(inputs);
+  }
+
+  /**
    * Gets the OutputFormatProviders for this MapReduce job.
    *
    * @return the OutputFormatProviders for the MapReduce job
    */
-  public Map<String, OutputFormatProvider> getOutputFormatProviders() {
+  Map<String, OutputFormatProvider> getOutputFormatProviders() {
     return ImmutableMap.copyOf(outputFormatProviders);
   }
 
@@ -277,19 +312,6 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     this.reducerResources = resources;
   }
 
-  @Nullable
-  private static MetricsContext getMetricsCollector(Program program, String runId,
-                                                    @Nullable MetricsCollectionService service) {
-    if (service == null) {
-      return null;
-    }
-
-    Map<String, String> tags = Maps.newHashMap();
-    tags.putAll(getMetricsContext(program, runId));
-
-    return service.getContext(tags);
-  }
-
   @Override
   public Metrics getMetrics() {
     return userMetrics;
@@ -297,12 +319,6 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
 
   public LoggingContext getLoggingContext() {
     return loggingContext;
-  }
-
-  @Nullable
-  public InputFormatProvider getInputFormatProvider() {
-
-    return inputFormatProvider;
   }
 
   public Resources getMapperResources() {
@@ -315,6 +331,16 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
 
   public File getPluginArchive() {
     return pluginArchive;
+  }
+
+  /**
+   * Returns the information about Workflow if the MapReduce program is executed
+   * as a part of it, otherwise {@code null} is returned.
+   */
+  @Override
+  @Nullable
+  public WorkflowProgramInfo getWorkflowInfo() {
+    return workflowProgramInfo;
   }
 
   @Override
@@ -331,16 +357,54 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     return resourcesToLocalize;
   }
 
-  @Nullable
+
+  private Input.InputFormatProviderInput createInput(Input.DatasetInput datasetInput) {
+    String datasetName = datasetInput.getName();
+    Map<String, String> datasetArgs = datasetInput.getArguments();
+    // keep track of the original alias to set it on the created Input before returning it
+    String originalAlias = datasetInput.getAlias();
+
+    // TODO: It's a hack for stream. It was introduced in Reactor 2.2.0. Fix it when addressing CDAP-4158.
+    // This check is needed due to the implementation of AbstractMapReduce#useStreamInput(StreamBatchReadable).
+    // It can probably be removed once that method is removed (deprecated currently).
+    if (datasetName.startsWith(Constants.Stream.URL_PREFIX)) {
+      StreamBatchReadable streamBatchReadable = new StreamBatchReadable(URI.create(datasetName));
+      Input input = Input.of(streamBatchReadable.getStreamName(),
+                             new StreamInputFormatProvider(getProgram().getId().getNamespace(),
+                                                           streamBatchReadable, streamAdmin));
+      return (Input.InputFormatProviderInput) input.alias(originalAlias);
+    }
+    DatasetInputFormatProvider datasetInputFormatProvider =
+      new DatasetInputFormatProvider(datasetName, datasetArgs, getDataset(datasetName, datasetArgs, AccessType.READ),
+                                     datasetInput.getSplits(), MapReduceBatchReadableInputFormat.class);
+    return (Input.InputFormatProviderInput) Input.of(datasetName, datasetInputFormatProvider).alias(originalAlias);
+  }
+
   private InputFormatProvider createInputFormatProvider(String datasetName,
                                                         Map<String, String> datasetArgs,
                                                         @Nullable List<Split> splits) {
-    // TODO: It's a hack for stream. It was introduced in Reactor 2.2.0. Fix it when addressing CDAP-4158.
-    if (datasetName.startsWith(Constants.Stream.URL_PREFIX)) {
-      return new StreamInputFormatProvider(getProgram().getId().getNamespace(),
-                                           new StreamBatchReadable(URI.create(datasetName)), streamAdmin);
+    return createInput((Input.DatasetInput) Input.ofDataset(datasetName, datasetArgs, splits)).getInputFormatProvider();
+  }
+
+  private static MetricsContext createMetricsContext(Program program, String runId, MetricsCollectionService service,
+                                                     @Nullable WorkflowProgramInfo workflowProgramInfo) {
+    Map<String, String> tags = Maps.newHashMap();
+    tags.putAll(getMetricsContext(program, runId));
+
+    MetricsContext programMetricsContext = service.getContext(tags);
+
+    if (workflowProgramInfo == null) {
+      return programMetricsContext;
     }
-    return new DatasetInputFormatProvider(datasetName, datasetArgs, getDataset(datasetName, datasetArgs),
-                                          splits, MapReduceBatchReadableInputFormat.class);
+
+    // If running inside Workflow, add the WorkflowMetricsContext as well
+    tags = Maps.newHashMap();
+    tags.put(Constants.Metrics.Tag.NAMESPACE, program.getNamespaceId());
+    tags.put(Constants.Metrics.Tag.APP, program.getApplicationId());
+    tags.put(Constants.Metrics.Tag.WORKFLOW, workflowProgramInfo.getName());
+    tags.put(Constants.Metrics.Tag.RUN_ID, workflowProgramInfo.getRunId().getId());
+    tags.put(Constants.Metrics.Tag.NODE, workflowProgramInfo.getNodeId());
+
+    return new MultiMetricsContext(programMetricsContext, service.getContext(tags));
   }
 }

@@ -16,9 +16,11 @@
 
 function myTrackerApi(myCdapUrl, $resource, myAuth, myHelpers) {
   var url = myCdapUrl.constructUrl,
-      searchPath = '/namespaces/:namespace/metadata/search',
-      basePath = '/namespaces/:namespace/:entityType/:entityId';
-
+      searchPath = '/namespaces/:namespace/metadata/search?target=stream&target=dataset&target=view',
+      basePath = '/namespaces/:namespace/:entityType/:entityId',
+      programPath = '/namespaces/:namespace/apps/:appId/:programType/:programId/runs/:runId',
+      auditPath = '/namespaces/:namespace/apps/Tracker/services/AuditLog/methods/auditlog/:entityType/:entityId',
+      navigatorPath = '/namespaces/:namespace/apps/_ClouderaNavigator';
 
   return $resource(
     url({ _cdapPath: searchPath }),
@@ -28,7 +30,18 @@ function myTrackerApi(myCdapUrl, $resource, myAuth, myHelpers) {
   {
     search: myHelpers.getConfig('GET', 'REQUEST', searchPath, true),
     properties: myHelpers.getConfig('GET', 'REQUEST', basePath + '/metadata', true),
-    viewsProperties: myHelpers.getConfig('GET', 'REQUEST', basePath + '/views/:viewId/metadata', true)
+    viewsProperties: myHelpers.getConfig('GET', 'REQUEST', basePath + '/views/:viewId/metadata', true),
+    getLineage: myHelpers.getConfig('GET', 'REQUEST', basePath + '/lineage?collapse=access&collapse=run&collapse=component'),
+    getProgramRunStatus: myHelpers.getConfig('GET', 'REQUEST', programPath),
+    getAuditLogs: myHelpers.getConfig('GET', 'REQUEST', auditPath),
+    getStreamProperties: myHelpers.getConfig('GET', 'REQUEST', '/namespaces/:namespace/streams/:entityId'),
+    getDatasetSystemProperties: myHelpers.getConfig('GET', 'REQUEST', basePath + '/metadata/properties?scope=SYSTEM'),
+    getDatasetDetail: myHelpers.getConfig('GET', 'REQUEST', '/namespaces/:namespace/data/datasets/:entityId'),
+    deployNavigator: myHelpers.getConfig('PUT', 'REQUEST', navigatorPath, false, { contentType: 'application/json' }),
+    getCDAPConfig: myHelpers.getConfig('GET', 'REQUEST', '/config/cdap', true),
+    getNavigatorApp: myHelpers.getConfig('GET', 'REQUEST', navigatorPath, false, { suppressErrors: true }),
+    getNavigatorStatus: myHelpers.getConfig('GET', 'REQUEST', navigatorPath + '/flows/MetadataFlow/runs', true),
+    toggleNavigator: myHelpers.getConfig('POST', 'REQUEST', navigatorPath + '/flows/MetadataFlow/:action', false)
   });
 }
 

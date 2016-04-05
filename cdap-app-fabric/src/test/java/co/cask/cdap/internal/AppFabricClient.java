@@ -31,6 +31,7 @@ import co.cask.cdap.gateway.handlers.WorkflowHttpHandler;
 import co.cask.cdap.internal.app.BufferFileInputStream;
 import co.cask.cdap.internal.app.runtime.schedule.SchedulerException;
 import co.cask.cdap.internal.test.AppJarHelper;
+import co.cask.cdap.proto.ApplicationDetail;
 import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.Instances;
 import co.cask.cdap.proto.NamespaceMeta;
@@ -44,6 +45,9 @@ import co.cask.cdap.proto.artifact.AppRequest;
 import co.cask.cdap.proto.codec.ScheduleSpecificationCodec;
 import co.cask.cdap.proto.codec.WorkflowTokenDetailCodec;
 import co.cask.cdap.proto.codec.WorkflowTokenNodeDetailCodec;
+import co.cask.cdap.proto.id.ApplicationId;
+import co.cask.cdap.proto.id.NamespaceId;
+import co.cask.cdap.proto.id.ProgramId;
 import co.cask.http.BodyConsumer;
 import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
@@ -67,9 +71,7 @@ import java.io.File;
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import javax.annotation.Nullable;
-import javax.ws.rs.core.MediaType;
 
 /**
  * Client tool for AppFabricHttpHandler.
@@ -172,8 +174,7 @@ public class AppFabricClient {
     return json.get("status");
   }
 
-  public void setWorkerInstances(String namespaceId, String appId, String workerId, int instances)
-    throws ExecutionException, InterruptedException {
+  public void setWorkerInstances(String namespaceId, String appId, String workerId, int instances) throws Exception {
     MockResponder responder = new MockResponder();
     String uri = String.format("%s/apps/%s/worker/%s/instances", getNamespacePath(namespaceId), appId, workerId);
     HttpRequest request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.PUT, uri);
@@ -194,7 +195,7 @@ public class AppFabricClient {
   }
 
   public void setServiceInstances(String namespaceId, String applicationId, String serviceName,
-                                  int instances) throws ExecutionException, InterruptedException {
+                                  int instances) throws Exception {
     MockResponder responder = new MockResponder();
     String uri = String.format("%s/apps/%s/services/%s/instances",
                                getNamespacePath(namespaceId), applicationId, serviceName);
@@ -216,8 +217,8 @@ public class AppFabricClient {
     return responder.decodeResponseContent(ServiceInstances.class);
   }
 
-  public void setFlowletInstances(String namespaceId, String applicationId, String flowId,
-                                  String flowletName, int instances) throws ExecutionException, InterruptedException {
+  public void setFlowletInstances(String namespaceId, String applicationId, String flowId, String flowletName,
+                                  int instances) throws Exception {
     MockResponder responder = new MockResponder();
     String uri = String.format("%s/apps/%s/flows/%s/flowlets/%s/instances/%s",
                                getNamespacePath(namespaceId), applicationId, flowId, flowletName, instances);
@@ -347,12 +348,7 @@ public class AppFabricClient {
     }
   }
 
-  public Location deployApplication(Id.Namespace namespace, String appName, Class<?> applicationClz,
-                                    File ...bundleEmbeddedJars) throws Exception {
-    return deployApplication(namespace, appName, applicationClz, null, bundleEmbeddedJars);
-  }
-
-  public Location deployApplication(Id.Namespace namespace, String appName, Class<?> applicationClz,
+  public Location deployApplication(Id.Namespace namespace, Class<?> applicationClz,
                                     String config, File...bundleEmbeddedJars) throws Exception {
 
     Preconditions.checkNotNull(applicationClz, "Application cannot be null.");
@@ -360,7 +356,7 @@ public class AppFabricClient {
     Location deployedJar = AppJarHelper.createDeploymentJar(locationFactory, applicationClz, bundleEmbeddedJars);
     LOG.info("Created deployedJar at {}", deployedJar);
 
-    String archiveName = String.format("%s-1.0.%d.jar", appName, System.currentTimeMillis());
+    String archiveName = String.format("%s-1.0.%d.jar", applicationClz.getSimpleName(), System.currentTimeMillis());
     DefaultHttpRequest request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST,
                                                         String.format("/v3/namespaces/%s/apps", namespace.getId()));
     request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
@@ -391,20 +387,85 @@ public class AppFabricClient {
   public void deployApplication(Id.Application appId, AppRequest appRequest) throws Exception {
 
     DefaultHttpRequest request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.PUT,
-      String.format("/v3/namespaces/%s/apps/%s", appId.getNamespaceId(), appId.getId()));
+      String.format("%s/apps/%s", getNamespacePath(appId.getNamespaceId()), appId.getId()));
     request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
+    request.setContent(ChannelBuffers.wrappedBuffer(Bytes.toBytes(GSON.toJson(appRequest.getConfig()))));
 
     MockResponder mockResponder = new MockResponder();
 
-    BodyConsumer bodyConsumer = appLifecycleHttpHandler.deploy(request, mockResponder,
-      appId.getNamespaceId(), appId.getId(),
-      appRequest.getArtifact().getName(),
-      GSON.toJson(appRequest.getConfig()),
-      MediaType.APPLICATION_JSON);
+    BodyConsumer bodyConsumer = appLifecycleHttpHandler.create(request, mockResponder,
+                                                               appId.getNamespaceId(), appId.getId());
     Preconditions.checkNotNull(bodyConsumer, "BodyConsumer from deploy call should not be null");
 
-    bodyConsumer.chunk(ChannelBuffers.wrappedBuffer(Bytes.toBytes(GSON.toJson(appRequest))), mockResponder);
+    byte[] contents = Bytes.toBytes(GSON.toJson(appRequest));
+    Preconditions.checkNotNull(contents);
+    bodyConsumer.chunk(ChannelBuffers.wrappedBuffer(contents), mockResponder);
     bodyConsumer.finished(mockResponder);
     verifyResponse(HttpResponseStatus.OK, mockResponder.getStatus(), "Failed to deploy app");
+  }
+
+  public void updateApplication(ApplicationId appId, AppRequest appRequest) throws Exception {
+    DefaultHttpRequest request = new DefaultHttpRequest(
+        HttpVersion.HTTP_1_1, HttpMethod.PUT,
+        String.format("%s/apps/%s/update", getNamespacePath(appId.getNamespace()), appId.getApplication())
+    );
+    request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
+    byte[] contents = Bytes.toBytes(GSON.toJson(appRequest));
+    Preconditions.checkNotNull(contents);
+    request.setContent(ChannelBuffers.wrappedBuffer(contents));
+    MockResponder mockResponder = new MockResponder();
+    appLifecycleHttpHandler.updateApp(request, mockResponder, appId.getNamespace(), appId.getApplication());
+    verifyResponse(HttpResponseStatus.OK, mockResponder.getStatus(), "Updating app failed");
+  }
+
+  public void deleteApplication(ApplicationId appId) throws Exception {
+    DefaultHttpRequest request = new DefaultHttpRequest(
+      HttpVersion.HTTP_1_1, HttpMethod.DELETE,
+      String.format("%s/apps/%s", getNamespacePath(appId.getNamespace()), appId.getApplication())
+    );
+    request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
+    MockResponder mockResponder = new MockResponder();
+    appLifecycleHttpHandler.deleteApp(request, mockResponder, appId.getNamespace(), appId.getApplication());
+    verifyResponse(HttpResponseStatus.OK, mockResponder.getStatus(), "Deleting app failed");
+  }
+
+  public void deleteAllApplications(NamespaceId namespaceId) throws Exception {
+    DefaultHttpRequest request = new DefaultHttpRequest(
+      HttpVersion.HTTP_1_1, HttpMethod.DELETE,
+      String.format("%s/apps", getNamespacePath(namespaceId.getNamespace()))
+    );
+    request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
+    MockResponder mockResponder = new MockResponder();
+    appLifecycleHttpHandler.deleteAllApps(request, mockResponder, namespaceId.getNamespace());
+    verifyResponse(HttpResponseStatus.OK, mockResponder.getStatus(), "Deleting all apps failed");
+  }
+
+  public ApplicationDetail getInfo(ApplicationId appId) throws Exception {
+    DefaultHttpRequest request = new DefaultHttpRequest(
+      HttpVersion.HTTP_1_1, HttpMethod.GET,
+      String.format("%s/apps/%s", getNamespacePath(appId.getNamespace()), appId.getApplication())
+    );
+    request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
+    MockResponder mockResponder = new MockResponder();
+    appLifecycleHttpHandler.getAppInfo(request, mockResponder, appId.getNamespace(), appId.getApplication());
+    verifyResponse(HttpResponseStatus.OK, mockResponder.getStatus(), "Getting app info failed");
+    return mockResponder.decodeResponseContent(new TypeToken<ApplicationDetail>() { }.getType(), GSON);
+  }
+
+  public void setRuntimeArgs(ProgramId programId, Map<String, String> args) throws Exception {
+    DefaultHttpRequest request = new DefaultHttpRequest(
+      HttpVersion.HTTP_1_1, HttpMethod.PUT,
+      String.format("%s/apps/%s/%s/%s/runtimeargs", getNamespacePath(programId.getNamespace()),
+                    programId.getApplication(), programId.getType().getCategoryName(), programId.getProgram())
+    );
+    request.setHeader(Constants.Gateway.API_KEY, "api-key-example");
+    byte[] contents = Bytes.toBytes(GSON.toJson(args));
+    Preconditions.checkNotNull(contents);
+    request.setContent(ChannelBuffers.wrappedBuffer(contents));
+    MockResponder mockResponder = new MockResponder();
+    programLifecycleHttpHandler.saveProgramRuntimeArgs(request, mockResponder, programId.getNamespace(),
+                                                       programId.getApplication(),
+                                                       programId.getType().getCategoryName(), programId.getProgram());
+    verifyResponse(HttpResponseStatus.OK, mockResponder.getStatus(), "Saving runtime arguments failed");
   }
 }

@@ -102,7 +102,9 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
       deployModule("module2", TestModule2.class);
 
       // create dataset instance
-      Assert.assertEquals(HttpStatus.SC_OK, createInstance("dataset1", "datasetType2", props).getResponseCode());
+      String description = "test instance description";
+      HttpResponse response = createInstance("dataset1", "datasetType2", description, props);
+      Assert.assertEquals(HttpStatus.SC_OK, response.getResponseCode());
 
       // verify module cannot be deleted which type is used for the dataset
       int modulesBeforeDelete = getModules().getResponseObject().size();
@@ -114,7 +116,7 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
       instances = getInstances().getResponseObject();
       Assert.assertEquals(1, instances.size());
       // verifying spec is same as expected
-      DatasetSpecification dataset1Spec = createSpec("dataset1", "datasetType2", props);
+      DatasetSpecification dataset1Spec = createType2Spec("dataset1", "datasetType2", description, props);
       Assert.assertEquals(spec2Summary(dataset1Spec), instances.get(0));
 
       // verify created instance info can be retrieved
@@ -143,8 +145,13 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
 
       // verify creation of dataset instance with null properties
       Assert.assertEquals(HttpStatus.SC_OK, createInstance("nullPropertiesTable", "datasetType2").getResponseCode());
+      // since dataset instance description is not provided, we are using the description given by the dataset type
+      DatasetSpecification nullPropertiesTableSpec = createType2Spec("nullPropertiesTable", "datasetType2",
+                                                          TestModule2.DESCRIPTION, DatasetProperties.EMPTY);
+      DatasetSpecificationSummary actualSummary = getSummaryForInstance("nullPropertiesTable",
+                                                                        getInstances().getResponseObject());
+      Assert.assertEquals(spec2Summary(nullPropertiesTableSpec), actualSummary);
 
-    } finally {
       // delete dataset instance
       Assert.assertEquals(HttpStatus.SC_OK, deleteInstance("dataset1").getResponseCode());
       Assert.assertEquals(HttpStatus.SC_OK, deleteInstance("nullPropertiesTable").getResponseCode());
@@ -153,6 +160,12 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
       // delete dataset modules
       Assert.assertEquals(HttpStatus.SC_OK, deleteModule("module2").getResponseCode());
       Assert.assertEquals(HttpStatus.SC_OK, deleteModule("module1").getResponseCode());
+
+    } finally {
+      deleteInstance("dataset1");
+      deleteInstance("nullPropertiesTable");
+      deleteModule("module2");
+      deleteModule("module1");
     }
   }
 
@@ -179,12 +192,26 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
       instances = getInstances().getResponseObject();
       Assert.assertEquals(1, instances.size());
 
+      DatasetMeta meta = getInstanceObject("dataset1").getResponseObject();
+      Map<String, String> storedOriginalProps = meta.getSpec().getOriginalProperties();
+      Assert.assertEquals(props.getProperties(), storedOriginalProps);
+
+      Map<String, String> retrievedProps = getInstanceProperties("dataset1").getResponseObject();
+      Assert.assertEquals(props.getProperties(), retrievedProps);
+
       Map<String, String> newProps = ImmutableMap.of("prop2", "val2");
 
       // update dataset instance
       Assert.assertEquals(HttpStatus.SC_OK, updateInstance("dataset1", newProps).getResponseCode());
-      Assert.assertEquals("val2", getInstanceObject("dataset1").getResponseObject().getSpec().getProperty("prop2"));
-      Assert.assertNull(getInstanceObject("dataset1").getResponseObject().getSpec().getProperty("prop1"));
+
+      meta = getInstanceObject("dataset1").getResponseObject();
+      Assert.assertEquals(newProps, meta.getSpec().getOriginalProperties());
+      Assert.assertEquals("val2", meta.getSpec().getProperty("prop2"));
+      Assert.assertNull(meta.getSpec().getProperty("prop1"));
+
+      retrievedProps = getInstanceProperties("dataset1").getResponseObject();
+      Assert.assertEquals(newProps, retrievedProps);
+
     } finally {
       // delete dataset instance
       Assert.assertEquals(HttpStatus.SC_OK, deleteInstance("dataset1").getResponseCode());
@@ -312,17 +339,27 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
     return createInstance(Id.DatasetInstance.from(Id.Namespace.DEFAULT, instanceName), typeName, props);
   }
 
+  private HttpResponse createInstance(String instanceName, String typeName, String description,
+                                      DatasetProperties props) throws IOException {
+    return createInstance(Id.DatasetInstance.from(Id.Namespace.DEFAULT, instanceName), typeName, description, props);
+  }
+
   private HttpResponse createInstance(String instanceName, String typeName) throws IOException {
     return createInstance(Id.DatasetInstance.from(Id.Namespace.DEFAULT, instanceName), typeName, null);
   }
 
   private HttpResponse createInstance(Id.DatasetInstance instance, String typeName,
                                       @Nullable DatasetProperties props) throws IOException {
+    return createInstance(instance, typeName, null, props);
+  }
+
+  private HttpResponse createInstance(Id.DatasetInstance instance, String typeName, @Nullable String description,
+                                      @Nullable DatasetProperties props) throws IOException {
     DatasetInstanceConfiguration creationProperties;
     if (props != null) {
-      creationProperties = new DatasetInstanceConfiguration(typeName, props.getProperties());
+      creationProperties = new DatasetInstanceConfiguration(typeName, props.getProperties(), description);
     } else {
-      creationProperties = new DatasetInstanceConfiguration(typeName, null);
+      creationProperties = new DatasetInstanceConfiguration(typeName, null, description);
     }
     HttpRequest request = HttpRequest.put(getUrl(instance.getNamespaceId(), "/data/datasets/" + instance.getId()))
       .withBody(GSON.toJson(creationProperties)).build();
@@ -346,7 +383,8 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
 
   private ObjectResponse<List<DatasetSpecificationSummary>> getInstances(String namespace) throws IOException {
     return ObjectResponse.fromJsonBody(makeInstancesRequest(namespace),
-                                       new TypeToken<List<DatasetSpecificationSummary>>() { }.getType());
+                                       new TypeToken<List<DatasetSpecificationSummary>>() {
+                                       }.getType());
   }
 
   private HttpResponse makeInstancesRequest(String namespace) throws IOException {
@@ -370,6 +408,12 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
     return ObjectResponse.fromJsonBody(response, DatasetMeta.class);
   }
 
+  private ObjectResponse<Map<String, String>> getInstanceProperties(String instanceName) throws IOException {
+    HttpRequest request = HttpRequest.get(getUrl("/data/datasets/" + instanceName + "/properties")).build();
+    HttpResponse response = HttpRequests.execute(request);
+    return ObjectResponse.fromJsonBody(response, new TypeToken<Map<String, String>>() { }.getType());
+  }
+
   private HttpResponse deleteInstance(String instanceName) throws IOException {
     return deleteInstance(Id.DatasetInstance.from(Id.Namespace.DEFAULT, instanceName));
   }
@@ -388,13 +432,25 @@ public class DatasetInstanceHandlerTest extends DatasetServiceTestBase {
     }
   }
 
-  private static DatasetSpecification createSpec(String instanceName, String typeName,
-                                                 DatasetProperties properties) {
-    return DatasetSpecification.builder(instanceName, typeName).properties(properties.getProperties()).build();
+  private static DatasetSpecification createType2Spec(String instanceName, String typeName, String description,
+                                                      DatasetProperties properties) {
+    return new TestModule2().createDefinition(typeName).configure(instanceName, properties)
+      .setOriginalProperties(properties).setDescription(description);
   }
 
   private DatasetSpecificationSummary spec2Summary(DatasetSpecification spec) {
-    return new DatasetSpecificationSummary(spec.getName(), spec.getType(), spec.getProperties());
+    return new DatasetSpecificationSummary(spec.getName(), spec.getType(), spec.getDescription(),
+                                           spec.getOriginalProperties());
+  }
+
+  private DatasetSpecificationSummary getSummaryForInstance(String instanceName,
+                                                            List<DatasetSpecificationSummary> summaries) {
+    for (DatasetSpecificationSummary summary : summaries) {
+      if (instanceName.equals(summary.getName())) {
+        return summary;
+      }
+    }
+    return null;
   }
 
   @Test

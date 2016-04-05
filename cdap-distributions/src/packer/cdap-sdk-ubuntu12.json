@@ -1,6 +1,6 @@
 {
   "variables": {
-    "sdk_version": "3.3.1"
+    "sdk_version": "3.3.2"
   },
   "builders": [
     {
@@ -87,7 +87,7 @@
         },
         "idea": {
           "setup_dir": "/opt",
-          "version": "15.0.2"
+          "version": "2016.1"
         },
         "hadoop": {
           "distribution": "hdp",

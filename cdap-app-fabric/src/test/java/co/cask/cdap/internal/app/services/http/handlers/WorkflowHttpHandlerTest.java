@@ -24,6 +24,7 @@ import co.cask.cdap.ConditionalWorkflowApp;
 import co.cask.cdap.PauseResumeWorklowApp;
 import co.cask.cdap.WorkflowAppWithErrorRuns;
 import co.cask.cdap.WorkflowAppWithFork;
+import co.cask.cdap.WorkflowAppWithLocalDatasets;
 import co.cask.cdap.WorkflowAppWithScopedParameters;
 import co.cask.cdap.WorkflowFailureInForkApp;
 import co.cask.cdap.WorkflowTokenTestPutApp;
@@ -35,6 +36,7 @@ import co.cask.cdap.common.conf.Constants;
 import co.cask.cdap.common.utils.Tasks;
 import co.cask.cdap.gateway.handlers.WorkflowHttpHandler;
 import co.cask.cdap.internal.app.services.http.AppFabricTestBase;
+import co.cask.cdap.proto.DatasetSpecificationSummary;
 import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.ProgramRunStatus;
 import co.cask.cdap.proto.ProgramStatus;
@@ -42,12 +44,15 @@ import co.cask.cdap.proto.ProgramType;
 import co.cask.cdap.proto.RunRecord;
 import co.cask.cdap.proto.ScheduledRuntime;
 import co.cask.cdap.proto.StreamProperties;
+import co.cask.cdap.proto.WorkflowNodeStateDetail;
 import co.cask.cdap.proto.WorkflowTokenDetail;
 import co.cask.cdap.proto.WorkflowTokenNodeDetail;
 import co.cask.cdap.proto.codec.ScheduleSpecificationCodec;
 import co.cask.cdap.proto.codec.WorkflowActionSpecificationCodec;
 import co.cask.cdap.proto.codec.WorkflowTokenDetailCodec;
 import co.cask.cdap.proto.codec.WorkflowTokenNodeDetailCodec;
+import co.cask.cdap.proto.id.Ids;
+import co.cask.cdap.proto.id.ProgramId;
 import co.cask.cdap.test.XSlowTests;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
@@ -87,7 +92,12 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
     .registerTypeAdapter(WorkflowTokenNodeDetail.class, new WorkflowTokenNodeDetailCodec())
     .create();
 
-  protected static final Type LIST_WORKFLOWACTIONNODE_TYPE = new TypeToken<List<WorkflowActionNode>>() { }.getType();
+  private static final Type LIST_WORKFLOWACTIONNODE_TYPE = new TypeToken<List<WorkflowActionNode>>() { }.getType();
+  private static final Type MAP_STRING_TO_WORKFLOWNODESTATEDETAIL_TYPE
+    = new TypeToken<Map<String, WorkflowNodeStateDetail>>() { }.getType();
+  private static final Type MAP_STRING_TO_DATASETSPECIFICATIONSUMMARY_TYPE
+    = new TypeToken<Map<String, DatasetSpecificationSummary>>() { }.getType();
+
 
   private void verifyRunningProgramCount(final Id.Program program, final String runId, final int expected)
     throws Exception {
@@ -183,6 +193,97 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
                                               program.getNamespaceId());
     HttpResponse response = doGet(versionedUrl);
     return readResponse(response, new TypeToken<List<ScheduledRuntime>>() { }.getType());
+  }
+
+  private String getLocalDatasetPath(ProgramId workflowId, String runId) {
+    String path = String.format("apps/%s/workflows/%s/runs/%s/localdatasets", workflowId.getApplication(),
+                                workflowId.getProgram(), runId);
+
+    return getVersionedAPIPath(path, Constants.Gateway.API_VERSION_3_TOKEN, workflowId.getNamespace());
+  }
+
+  private Map<String, DatasetSpecificationSummary> getWorkflowLocalDatasets(ProgramId workflowId, String runId)
+    throws Exception {
+    HttpResponse response = doGet(getLocalDatasetPath(workflowId, runId));
+    return readResponse(response, MAP_STRING_TO_DATASETSPECIFICATIONSUMMARY_TYPE);
+  }
+
+  private void deleteWorkflowLocalDatasets(ProgramId workflowId, String runId) throws Exception {
+    doDelete(getLocalDatasetPath(workflowId, runId));
+  }
+
+  @Test
+  public void testLocalDatasetDeletion() throws Exception {
+    String keyValueTableType = "co.cask.cdap.api.dataset.lib.KeyValueTable";
+    String filesetType = "co.cask.cdap.api.dataset.lib.FileSet";
+    Map<String, String> keyValueTableProperties = ImmutableMap.of("foo", "bar");
+    Map<String, String> filesetProperties = ImmutableMap.of("anotherFoo", "anotherBar");
+
+    HttpResponse response = deploy(WorkflowAppWithLocalDatasets.class,
+                                   Constants.Gateway.API_VERSION_3_TOKEN, TEST_NAMESPACE2);
+    Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+
+    File waitFile = new File(tmpFolder.newFolder() + "/wait.file");
+    File doneFile = new File(tmpFolder.newFolder() + "/done.file");
+
+    ProgramId workflowId = new ProgramId(TEST_NAMESPACE2, WorkflowAppWithLocalDatasets.NAME, ProgramType.WORKFLOW,
+                                         WorkflowAppWithLocalDatasets.WORKFLOW_NAME);
+
+    startProgram(workflowId.toId(), ImmutableMap.of("wait.file", waitFile.getAbsolutePath(),
+                                                    "done.file", doneFile.getAbsolutePath(),
+                                                    "dataset.*.keep.local", "true"));
+
+    while (!waitFile.exists()) {
+      TimeUnit.MILLISECONDS.sleep(50);
+    }
+
+    String runId = getRunIdOfRunningProgram(workflowId.toId());
+
+    doneFile.createNewFile();
+
+    waitState(workflowId.toId(), ProgramStatus.STOPPED.name());
+
+    Map<String, DatasetSpecificationSummary> localDatasetSummaries = getWorkflowLocalDatasets(workflowId, runId);
+    Assert.assertEquals(2, localDatasetSummaries.size());
+    DatasetSpecificationSummary keyValueTableSummary = new DatasetSpecificationSummary("MyTable." + runId,
+                                                                                       keyValueTableType,
+                                                                                       keyValueTableProperties);
+    Assert.assertEquals(keyValueTableSummary, localDatasetSummaries.get("MyTable"));
+    DatasetSpecificationSummary filesetSummary = new DatasetSpecificationSummary("MyFile." + runId, filesetType,
+                                                                                 filesetProperties);
+    Assert.assertEquals(filesetSummary, localDatasetSummaries.get("MyFile"));
+
+    deleteWorkflowLocalDatasets(workflowId, runId);
+
+    localDatasetSummaries = getWorkflowLocalDatasets(workflowId, runId);
+    Assert.assertEquals(0, localDatasetSummaries.size());
+
+    waitFile = new File(tmpFolder.newFolder() + "/wait.file");
+    doneFile = new File(tmpFolder.newFolder() + "/done.file");
+
+    startProgram(workflowId.toId(), ImmutableMap.of("wait.file", waitFile.getAbsolutePath(),
+                                                    "done.file", doneFile.getAbsolutePath(),
+                                                    "dataset.MyTable.keep.local", "true"));
+
+    while (!waitFile.exists()) {
+      TimeUnit.MILLISECONDS.sleep(50);
+    }
+
+    runId = getRunIdOfRunningProgram(workflowId.toId());
+
+    doneFile.createNewFile();
+
+    waitState(workflowId.toId(), ProgramStatus.STOPPED.name());
+    localDatasetSummaries = getWorkflowLocalDatasets(workflowId, runId);
+    Assert.assertEquals(1, localDatasetSummaries.size());
+    keyValueTableSummary = new DatasetSpecificationSummary("MyTable." + runId, keyValueTableType,
+                                                           keyValueTableProperties);
+
+    Assert.assertEquals(keyValueTableSummary, localDatasetSummaries.get("MyTable"));
+    deleteWorkflowLocalDatasets(workflowId, runId);
+
+    localDatasetSummaries = getWorkflowLocalDatasets(workflowId, runId);
+    Assert.assertEquals(0, localDatasetSummaries.size());
   }
 
   @Test
@@ -365,6 +466,7 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
   }
 
   private void verifyMultipleConcurrentRuns(Id.Program workflowId) throws Exception {
+    verifyProgramRuns(workflowId, ProgramRunStatus.RUNNING.name(), 1);
     List<RunRecord> historyRuns = getProgramRuns(workflowId, "running");
     Assert.assertEquals(2, historyRuns.size());
 
@@ -545,19 +647,28 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
     return record.getPid();
   }
 
+  private Map<String, WorkflowNodeStateDetail> getWorkflowNodeStates(ProgramId workflowId, String runId)
+    throws Exception {
+    String path = String.format("apps/%s/workflows/%s/runs/%s/nodes/state", workflowId.getApplication(),
+                                workflowId.getProgram(), runId);
+
+    path = getVersionedAPIPath(path, Constants.Gateway.API_VERSION_3_TOKEN, workflowId.getNamespace());
+
+    HttpResponse response = doGet(path);
+    return readResponse(response, MAP_STRING_TO_WORKFLOWNODESTATEDETAIL_TYPE);
+  }
+
   @Category(XSlowTests.class)
   @Test
   public void testWorkflowScopedArguments() throws Exception {
-    String workflowAppWithScopedParameters = "WorkflowAppWithScopedParameters";
-    String workflowAppWithScopedParameterWorkflow = "OneWorkflow";
-
+    String workflowRunIdProperty = "workflowrunid";
     HttpResponse response = deploy(WorkflowAppWithScopedParameters.class, Constants.Gateway.API_VERSION_3_TOKEN,
                                    TEST_NAMESPACE2);
 
     Assert.assertEquals(200, response.getStatusLine().getStatusCode());
 
-    Id.Program programId = Id.Program.from(TEST_NAMESPACE2, workflowAppWithScopedParameters, ProgramType.WORKFLOW,
-                                           workflowAppWithScopedParameterWorkflow);
+    ProgramId programId = Ids.namespace(TEST_NAMESPACE2).app(WorkflowAppWithScopedParameters.APP_NAME)
+      .workflow(WorkflowAppWithScopedParameters.ONE_WORKFLOW);
 
     Map<String, String> runtimeArguments = Maps.newHashMap();
 
@@ -567,6 +678,7 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
 
     runtimeArguments.put("input.path", createInput("ProgramInput"));
     runtimeArguments.put("mapreduce.OneMR.input.path", createInput("OneMRInput"));
+    runtimeArguments.put("mapreduce.OneMR.logical.start.time", "1234567890000");
     runtimeArguments.put("mapreduce.AnotherMR.input.path", createInput("AnotherMRInput"));
     runtimeArguments.put("spark.*.input.path", createInput("SparkInput"));
 
@@ -583,19 +695,19 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
     runtimeArguments.put("dataset.unknown.dataset", "false");
     runtimeArguments.put("dataset.*.read.timeout", "60");
 
-    setAndTestRuntimeArgs(programId, runtimeArguments);
+    setAndTestRuntimeArgs(programId.toId(), runtimeArguments);
 
     // Start the workflow
-    startProgram(programId);
-    waitState(programId, ProgramStatus.RUNNING.name());
+    startProgram(programId.toId());
+    waitState(programId.toId(), ProgramStatus.RUNNING.name());
 
     // Wait until we have a run record
-    verifyProgramRuns(programId, "running");
-    List<RunRecord> workflowHistoryRuns = getProgramRuns(programId, "running");
+    verifyProgramRuns(programId.toId(), "running");
+    List<RunRecord> workflowHistoryRuns = getProgramRuns(programId.toId(), "running");
     String workflowRunId = workflowHistoryRuns.get(0).getPid();
 
-    Id.Program mr1ProgramId = Id.Program.from(TEST_NAMESPACE2, workflowAppWithScopedParameters, ProgramType.MAPREDUCE,
-                                              "OneMR");
+    Id.Program mr1ProgramId = Id.Program.from(TEST_NAMESPACE2, WorkflowAppWithScopedParameters.APP_NAME,
+                                              ProgramType.MAPREDUCE, WorkflowAppWithScopedParameters.ONE_MR);
     waitState(mr1ProgramId, ProgramStatus.RUNNING.name());
     List<RunRecord> oneMRHistoryRuns = getProgramRuns(mr1ProgramId, "running");
 
@@ -604,27 +716,26 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
                                            new Id.Run(mr1ProgramId, oneMRHistoryRuns.get(0).getPid()), workflowRunId);
     stopProgram(mr1ProgramId, oneMRHistoryRuns.get(0).getPid(), 400, expectedMessage);
 
-    verifyProgramRuns(programId, "completed");
+    verifyProgramRuns(programId.toId(), "completed");
 
-    workflowHistoryRuns = getProgramRuns(programId, "completed");
+    workflowHistoryRuns = getProgramRuns(programId.toId(), "completed");
 
     oneMRHistoryRuns = getProgramRuns(mr1ProgramId, "completed");
 
-    Id.Program mr2ProgramId = Id.Program.from(TEST_NAMESPACE2, workflowAppWithScopedParameters, ProgramType.MAPREDUCE,
-                                              "AnotherMR");
+    Id.Program mr2ProgramId = Id.Program.from(TEST_NAMESPACE2, WorkflowAppWithScopedParameters.APP_NAME,
+                                              ProgramType.MAPREDUCE, WorkflowAppWithScopedParameters.ANOTHER_MR);
 
     List<RunRecord> anotherMRHistoryRuns = getProgramRuns(mr2ProgramId, "completed");
 
-    Id.Program spark1ProgramId = Id.Program.from(TEST_NAMESPACE2, workflowAppWithScopedParameters,
-                                                 ProgramType.SPARK, "OneSpark");
+    Id.Program spark1ProgramId = Id.Program.from(TEST_NAMESPACE2, WorkflowAppWithScopedParameters.APP_NAME,
+                                                 ProgramType.SPARK, WorkflowAppWithScopedParameters.ONE_SPARK);
 
     List<RunRecord> oneSparkHistoryRuns = getProgramRuns(spark1ProgramId, "completed");
 
-    Id.Program spark2ProgramId = Id.Program.from(TEST_NAMESPACE2, workflowAppWithScopedParameters, ProgramType.SPARK,
-                                              "AnotherSpark");
+    Id.Program spark2ProgramId = Id.Program.from(TEST_NAMESPACE2, WorkflowAppWithScopedParameters.APP_NAME,
+                                                 ProgramType.SPARK, WorkflowAppWithScopedParameters.ANOTHER_SPARK);
 
     List<RunRecord> anotherSparkHistoryRuns = getProgramRuns(spark2ProgramId, "completed");
-
 
     Assert.assertEquals(1, workflowHistoryRuns.size());
     Assert.assertEquals(1, oneMRHistoryRuns.size());
@@ -638,22 +749,58 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
     Map<String, String> oneSparkRunRecordProperties = oneSparkHistoryRuns.get(0).getProperties();
     Map<String, String> anotherSparkRunRecordProperties = anotherSparkHistoryRuns.get(0).getProperties();
 
-    Assert.assertNotNull(oneMRRunRecordProperties.get("workflowrunid"));
-    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), oneMRRunRecordProperties.get("workflowrunid"));
+    Assert.assertNotNull(oneMRRunRecordProperties.get(workflowRunIdProperty));
+    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), oneMRRunRecordProperties.get(workflowRunIdProperty));
 
-    Assert.assertNotNull(anotherMRRunRecordProperties.get("workflowrunid"));
-    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), anotherMRRunRecordProperties.get("workflowrunid"));
+    Assert.assertNotNull(anotherMRRunRecordProperties.get(workflowRunIdProperty));
+    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), anotherMRRunRecordProperties.get(workflowRunIdProperty));
 
-    Assert.assertNotNull(oneSparkRunRecordProperties.get("workflowrunid"));
-    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), oneSparkRunRecordProperties.get("workflowrunid"));
+    Assert.assertNotNull(oneSparkRunRecordProperties.get(workflowRunIdProperty));
+    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), oneSparkRunRecordProperties.get(workflowRunIdProperty));
 
-    Assert.assertNotNull(anotherSparkRunRecordProperties.get("workflowrunid"));
-    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(), anotherSparkRunRecordProperties.get("workflowrunid"));
+    Assert.assertNotNull(anotherSparkRunRecordProperties.get(workflowRunIdProperty));
+    Assert.assertEquals(workflowHistoryRuns.get(0).getPid(),
+                        anotherSparkRunRecordProperties.get(workflowRunIdProperty));
 
-    Assert.assertEquals(workflowRunRecordProperties.get("OneMR"), oneMRHistoryRuns.get(0).getPid());
-    Assert.assertEquals(workflowRunRecordProperties.get("OneSpark"), oneSparkHistoryRuns.get(0).getPid());
-    Assert.assertEquals(workflowRunRecordProperties.get("AnotherMR"), anotherMRHistoryRuns.get(0).getPid());
-    Assert.assertEquals(workflowRunRecordProperties.get("AnotherSpark"), anotherSparkHistoryRuns.get(0).getPid());
+    Assert.assertEquals(workflowRunRecordProperties.get(WorkflowAppWithScopedParameters.ONE_MR),
+                        oneMRHistoryRuns.get(0).getPid());
+    Assert.assertEquals(workflowRunRecordProperties.get(WorkflowAppWithScopedParameters.ONE_SPARK),
+                        oneSparkHistoryRuns.get(0).getPid());
+    Assert.assertEquals(workflowRunRecordProperties.get(WorkflowAppWithScopedParameters.ANOTHER_MR),
+                        anotherMRHistoryRuns.get(0).getPid());
+    Assert.assertEquals(workflowRunRecordProperties.get(WorkflowAppWithScopedParameters.ANOTHER_SPARK),
+                        anotherSparkHistoryRuns.get(0).getPid());
+
+
+    // Get Workflow node states
+    Map<String, WorkflowNodeStateDetail> nodeStates = getWorkflowNodeStates(programId,
+                                                                            workflowHistoryRuns.get(0).getPid());
+
+    Assert.assertNotNull(nodeStates);
+    Assert.assertEquals(5, nodeStates.size());
+    WorkflowNodeStateDetail mrNodeState = nodeStates.get(WorkflowAppWithScopedParameters.ONE_MR);
+    Assert.assertNotNull(mrNodeState);
+    Assert.assertEquals(WorkflowAppWithScopedParameters.ONE_MR, mrNodeState.getNodeId());
+    Assert.assertEquals(oneMRHistoryRuns.get(0).getPid(), mrNodeState.getRunId());
+
+    mrNodeState = nodeStates.get(WorkflowAppWithScopedParameters.ANOTHER_MR);
+    Assert.assertNotNull(mrNodeState);
+    Assert.assertEquals(WorkflowAppWithScopedParameters.ANOTHER_MR, mrNodeState.getNodeId());
+    Assert.assertEquals(anotherMRHistoryRuns.get(0).getPid(), mrNodeState.getRunId());
+
+    WorkflowNodeStateDetail sparkNodeState = nodeStates.get(WorkflowAppWithScopedParameters.ONE_SPARK);
+    Assert.assertNotNull(sparkNodeState);
+    Assert.assertEquals(WorkflowAppWithScopedParameters.ONE_SPARK, sparkNodeState.getNodeId());
+    Assert.assertEquals(oneSparkHistoryRuns.get(0).getPid(), sparkNodeState.getRunId());
+
+    sparkNodeState = nodeStates.get(WorkflowAppWithScopedParameters.ANOTHER_SPARK);
+    Assert.assertNotNull(sparkNodeState);
+    Assert.assertEquals(WorkflowAppWithScopedParameters.ANOTHER_SPARK, sparkNodeState.getNodeId());
+    Assert.assertEquals(anotherSparkHistoryRuns.get(0).getPid(), sparkNodeState.getRunId());
+
+    WorkflowNodeStateDetail oneActionNodeState = nodeStates.get(WorkflowAppWithScopedParameters.ONE_ACTION);
+    Assert.assertNotNull(oneActionNodeState);
+    Assert.assertEquals(WorkflowAppWithScopedParameters.ONE_ACTION, oneActionNodeState.getNodeId());
   }
 
   @Ignore
@@ -1129,8 +1276,8 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
     List<WorkflowTokenDetail.NodeValueDetail> nodeValueDetails =
       workflowTokenDetail.getTokenData().get(AppWithWorkflow.DummyAction.TOKEN_KEY);
     Assert.assertEquals(2, nodeValueDetails.size());
-    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.firstActionName, nodeValueDetails.get(0).getNode());
-    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.secondActionName, nodeValueDetails.get(1).getNode());
+    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.FIRST_ACTION, nodeValueDetails.get(0).getNode());
+    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.SECOND_ACTION, nodeValueDetails.get(1).getNode());
     Assert.assertEquals(AppWithWorkflow.DummyAction.TOKEN_VALUE, nodeValueDetails.get(0).getValue());
     Assert.assertEquals(AppWithWorkflow.DummyAction.TOKEN_VALUE, nodeValueDetails.get(1).getValue());
     // Verify entire workflow token by passing in the scope and key in the request
@@ -1138,20 +1285,20 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
                                            AppWithWorkflow.DummyAction.TOKEN_KEY);
     nodeValueDetails = workflowTokenDetail.getTokenData().get(AppWithWorkflow.DummyAction.TOKEN_KEY);
     Assert.assertEquals(2, nodeValueDetails.size());
-    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.firstActionName, nodeValueDetails.get(0).getNode());
-    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.secondActionName, nodeValueDetails.get(1).getNode());
+    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.FIRST_ACTION, nodeValueDetails.get(0).getNode());
+    Assert.assertEquals(AppWithWorkflow.SampleWorkflow.SECOND_ACTION, nodeValueDetails.get(1).getNode());
     Assert.assertEquals(AppWithWorkflow.DummyAction.TOKEN_VALUE, nodeValueDetails.get(0).getValue());
     Assert.assertEquals(AppWithWorkflow.DummyAction.TOKEN_VALUE, nodeValueDetails.get(1).getValue());
 
     // Verify workflow token at a given node
     WorkflowTokenNodeDetail tokenAtNode = getWorkflowToken(workflowId, pid,
-                                                           AppWithWorkflow.SampleWorkflow.firstActionName, null, null);
+                                                           AppWithWorkflow.SampleWorkflow.FIRST_ACTION, null, null);
     Map<String, String> tokenDataAtNode = tokenAtNode.getTokenDataAtNode();
     Assert.assertEquals(1, tokenDataAtNode.size());
     Assert.assertEquals(AppWithWorkflow.DummyAction.TOKEN_VALUE,
                         tokenDataAtNode.get(AppWithWorkflow.DummyAction.TOKEN_KEY));
     // Verify workflow token at a given node by passing in a scope and a key
-    tokenAtNode = getWorkflowToken(workflowId, pid, AppWithWorkflow.SampleWorkflow.firstActionName,
+    tokenAtNode = getWorkflowToken(workflowId, pid, AppWithWorkflow.SampleWorkflow.FIRST_ACTION,
                                    WorkflowToken.Scope.USER, AppWithWorkflow.DummyAction.TOKEN_KEY);
     tokenDataAtNode = tokenAtNode.getTokenDataAtNode();
     Assert.assertEquals(1, tokenDataAtNode.size());
@@ -1216,89 +1363,36 @@ public class WorkflowHttpHandlerTest  extends AppFabricTestBase {
     Id.Program mapReduceId = Id.Program.from(appId, ProgramType.MAPREDUCE, WorkflowTokenTestPutApp.RecordCounter.NAME);
     Id.Program sparkId = Id.Program.from(appId, ProgramType.SPARK, WorkflowTokenTestPutApp.SparkTestApp.NAME);
 
-    // Start program with "put.in.mapper.initialize" argument.
-    // It will perform put operation on the WorkflowToken in the Initialize method of the Mapper class.
-    // This should fail.
+    // Start program with inputPath and outputPath arguments.
+    // This should succeed. The programs inside the workflow will attempt to write to the workflow token
+    // from the Mapper's and Reducer's methods as well as from a Spark closure, and they will throw an exception
+    // if that succeeds.
+    // The MapReduce's beforeSubmit will record the workflow run id in the token, and the onFinish as well
+    // as the mapper and the reducer will validate that they have the same workflow run id.
     String outputPath = new File(tmpFolder.newFolder(), "output").getAbsolutePath();
-    startProgram(workflowId, ImmutableMap.of("inputPath", createInputForRecordVerification("firstInput"),
-                                             "outputPath", outputPath, "put.in.mapper.initialize", "true"));
-    waitState(workflowId, ProgramStatus.RUNNING.name());
-    waitState(workflowId, ProgramStatus.STOPPED.name());
-
-    verifyProgramRuns(workflowId, "failed");
-
-    List<RunRecord> mapReduceProgramRuns = getProgramRuns(mapReduceId, ProgramRunStatus.FAILED.name());
-    Assert.assertEquals(1, mapReduceProgramRuns.size());
-
-    // Start program with "put.in.map" argument.
-    // It will perform put operation on the WorkflowToken in the map method of the Mapper class.
-    // This should fail.
-    outputPath = new File(tmpFolder.newFolder(), "output").getAbsolutePath();
-    startProgram(workflowId, ImmutableMap.of("inputPath", createInputForRecordVerification("secondInput"),
-                                             "outputPath", outputPath, "put.in.map", "true"));
-    waitState(workflowId, ProgramStatus.RUNNING.name());
-    waitState(workflowId, ProgramStatus.STOPPED.name());
-
-    verifyProgramRuns(workflowId, "failed", 1);
-
-    mapReduceProgramRuns = getProgramRuns(mapReduceId, ProgramRunStatus.FAILED.name());
-    Assert.assertEquals(2, mapReduceProgramRuns.size());
-
-    // Start program with "put.in.reducer.initialize" argument.
-    // It will perform put operation on the WorkflowToken in the Initialize method of the Reducer class.
-    // This should fail.
-    outputPath = new File(tmpFolder.newFolder(), "output").getAbsolutePath();
-    startProgram(workflowId, ImmutableMap.of("inputPath", createInputForRecordVerification("thirdInput"),
-                                             "outputPath", outputPath, "put.in.reducer.initialize", "true"));
-    waitState(workflowId, ProgramStatus.RUNNING.name());
-    waitState(workflowId, ProgramStatus.STOPPED.name());
-
-    verifyProgramRuns(workflowId, "failed", 2);
-
-    mapReduceProgramRuns = getProgramRuns(mapReduceId, ProgramRunStatus.FAILED.name());
-    Assert.assertEquals(3, mapReduceProgramRuns.size());
-
-    // Start program with "put.in.reduce" argument.
-    // It will perform put operation on the WorkflowToken in the reduce method of the Reducer class.
-    // This should fail.
-    outputPath = new File(tmpFolder.newFolder(), "output").getAbsolutePath();
-    startProgram(workflowId, ImmutableMap.of("inputPath", createInputForRecordVerification("fourthInput"),
-                                             "outputPath", outputPath, "put.in.reduce", "true"));
-    waitState(workflowId, ProgramStatus.RUNNING.name());
-    waitState(workflowId, ProgramStatus.STOPPED.name());
-
-    verifyProgramRuns(workflowId, "failed", 3);
-
-    mapReduceProgramRuns = getProgramRuns(mapReduceId, ProgramRunStatus.FAILED.name());
-    Assert.assertEquals(4, mapReduceProgramRuns.size());
-
-    // Start program with closurePutToken parameter, so that put will be tried from the closure
-    outputPath = new File(tmpFolder.newFolder(), "output").getAbsolutePath();
-    startProgram(workflowId, ImmutableMap.of("inputPath", createInputForRecordVerification("fifthInput"),
-                                             "outputPath", outputPath, "closurePutToken", "true"));
-    waitState(workflowId, ProgramStatus.RUNNING.name());
-    waitState(workflowId, ProgramStatus.STOPPED.name());
-
-    verifyProgramRuns(workflowId, "failed", 4);
-
-    mapReduceProgramRuns = getProgramRuns(mapReduceId, ProgramRunStatus.COMPLETED.name());
-    Assert.assertEquals(1, mapReduceProgramRuns.size());
-
-    List<RunRecord> sparkProgramRuns = getProgramRuns(sparkId, ProgramRunStatus.FAILED.name());
-    Assert.assertEquals(1, sparkProgramRuns.size());
-
-    // Start program with only inputPath and outputPath arguments.
-    // This should succeed.
-    outputPath = new File(tmpFolder.newFolder(), "output").getAbsolutePath();
     startProgram(workflowId, ImmutableMap.of("inputPath", createInputForRecordVerification("sixthInput"),
                                              "outputPath", outputPath));
 
     waitState(workflowId, ProgramStatus.RUNNING.name());
     waitState(workflowId, ProgramStatus.STOPPED.name());
 
+    // validate the completed workflow run and validate that it is the same as recorded in the token
     verifyProgramRuns(workflowId, "completed");
+    List<RunRecord> runs = getProgramRuns(workflowId, "completed");
+    Assert.assertEquals(1, runs.size());
+    String wfRunId = runs.get(0).getPid();
+    WorkflowTokenDetail tokenDetail = getWorkflowToken(workflowId, wfRunId, null, null);
+    List<WorkflowTokenDetail.NodeValueDetail> details = tokenDetail.getTokenData().get("wf.runid");
+    Assert.assertEquals(1, details.size());
+    Assert.assertEquals(wfRunId, details.get(0).getValue());
 
-    sparkProgramRuns = getProgramRuns(sparkId, ProgramRunStatus.COMPLETED.name());
+    // validate that none of the mapper, reducer or spark closure were able to write to the token
+    for (String key : new String[] {
+      "mapper.initialize.key", "map.key", "reducer.initialize.key", "reduce.key", "some.key" }) {
+      Assert.assertFalse(tokenDetail.getTokenData().containsKey(key));
+    }
+
+    List<RunRecord> sparkProgramRuns = getProgramRuns(sparkId, ProgramRunStatus.COMPLETED.name());
     Assert.assertEquals(1, sparkProgramRuns.size());
   }
 

@@ -22,20 +22,23 @@
   <div class="groups-container">
     <div class="item"
           ng-repeat="group in MySidePanel.groups"
-          ng-click="MySidePanel.toggleGroup(group)"
-          ng-class="{'item-open': MySidePanel.openedGroup === group.name, 'group-default': MySidePanel.openedGroup === null }">
-      <div class="text-left item-heading {{group.name}}">
-        <span class="name">{{group.name | caskCapitalizeFilter}} </span>
+          ng-click="MySidePanel.openedGroup = group.name"
+          ng-style="MySidePanel.openedGroup === group.name && {height: MySidePanel.groupWrapperHeight}"
+          ng-class="{'item-open': MySidePanel.openedGroup === group.name }">
+      <div class="text-left item-heading {{group.name}}" >
+        <span class="fa"
+              ng-class="{'fa-caret-down': MySidePanel.openedGroup === group.name, 'fa-caret-right': MySidePanel.openedGroup !== group.name}">
+        </span>
+        <span class="name">{{group.name}} </span>
         <div class="pull-right">
           <span class="badge" >{{group.filtered.length}}</span>
         </div>
       </div>
-
       <div class="item-body-wrapper"
            ng-show="MySidePanel.openedGroup === null || MySidePanel.openedGroup === group.name">
         <div class="item-body">
           <div ng-repeat="plugin in group.filtered = (group.plugins | filter: {name: MySidePanel.searchText}) track by $index"
-               class="plugin-item"
+               class="plugin-item {{plugin.nodeClass}}"
                my-popover
                data-placement="right"
                data-template="plugin.template"
@@ -44,9 +47,16 @@
                ng-click="MySidePanel.onItemClicked($event, plugin)">
             <span ng-if="plugin.icon" class="text-center fa {{plugin.icon}}"></span>
             <span class="name">{{ (plugin.name || plugin.pluginTemplate) | myEllipsis: 15}}</span>
+            <span class="plugin-badge">T</span>
+          </div>
+          <div class="no-item-message" ng-if="group.filtered.length === 0">
+            No plugins found.
           </div>
         </div>
       </div>
+    </div>
+    <div ng-if="MySidePanel.groups.length === 0">
+      No groups found.
     </div>
   </div>
 </div>

@@ -16,6 +16,7 @@
 
 package co.cask.cdap.internal.app.runtime.spark;
 
+import co.cask.cdap.api.Admin;
 import co.cask.cdap.api.Resources;
 import co.cask.cdap.api.ServiceDiscoverer;
 import co.cask.cdap.api.app.ApplicationSpecification;
@@ -27,6 +28,7 @@ import co.cask.cdap.api.dataset.Dataset;
 import co.cask.cdap.api.metrics.Metrics;
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.api.metrics.MetricsContext;
+import co.cask.cdap.api.metrics.MultiMetricsContext;
 import co.cask.cdap.api.plugin.PluginContext;
 import co.cask.cdap.api.spark.Spark;
 import co.cask.cdap.api.spark.SparkContext;
@@ -37,16 +39,20 @@ import co.cask.cdap.api.workflow.WorkflowToken;
 import co.cask.cdap.app.metrics.ProgramUserMetrics;
 import co.cask.cdap.common.conf.Constants;
 import co.cask.cdap.common.logging.LoggingContext;
+import co.cask.cdap.data.dataset.SystemDatasetInstantiator;
+import co.cask.cdap.data2.dataset2.DatasetFramework;
 import co.cask.cdap.internal.app.program.ProgramTypeMetricTag;
+import co.cask.cdap.internal.app.runtime.DefaultAdmin;
+import co.cask.cdap.internal.app.runtime.ProgramRunners;
 import co.cask.cdap.internal.app.runtime.plugin.PluginInstantiator;
 import co.cask.cdap.internal.app.runtime.spark.metrics.SparkUserMetrics;
+import co.cask.cdap.internal.app.runtime.workflow.WorkflowProgramInfo;
 import co.cask.cdap.logging.context.SparkLoggingContext;
 import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.ProgramType;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import org.apache.spark.SparkConf;
 import org.apache.twill.api.RunId;
@@ -54,6 +60,7 @@ import org.apache.twill.discovery.DiscoveryServiceClient;
 
 import java.io.Closeable;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -76,25 +83,27 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
   private final MetricsContext metricsContext;
   private final LoggingContext loggingContext;
   private final PluginInstantiator pluginInstantiator;
-  private final WorkflowToken workflowToken;
+  private final Admin admin;
+  protected final SystemDatasetInstantiator systemDatasetInstantiator;
+  private final WorkflowProgramInfo workflowProgramInfo;
+
 
   private Resources executorResources;
   private SparkConf sparkConf;
 
   protected AbstractSparkContext(ApplicationSpecification applicationSpecification,
                                  SparkSpecification specification, Id.Program programId, RunId runId,
-                                 ClassLoader programClassLoader, long logicalStartTime,
+                                 ClassLoader programClassLoader,
                                  Map<String, String> runtimeArguments, DiscoveryServiceClient discoveryServiceClient,
                                  MetricsContext metricsContext, LoggingContext loggingContext,
+                                 DatasetFramework dsFramework,
                                  @Nullable PluginInstantiator pluginInstantiator,
-                                 @Nullable WorkflowToken workflowToken) {
+                                 @Nullable WorkflowProgramInfo workflowProgramInfo) {
     this.applicationSpecification = applicationSpecification;
     this.specification = specification;
     this.programId = programId;
     this.runId = runId;
     this.programClassLoader = programClassLoader;
-    this.logicalStartTime = logicalStartTime;
-    this.runtimeArguments = ImmutableMap.copyOf(runtimeArguments);
     this.discoveryServiceClient = discoveryServiceClient;
     this.userMetrics = new ProgramUserMetrics(metricsContext);
     this.metricsContext = metricsContext;
@@ -102,7 +111,14 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
     this.executorResources = Objects.firstNonNull(specification.getExecutorResources(), new Resources());
     this.sparkConf = new SparkConf();
     this.pluginInstantiator = pluginInstantiator;
-    this.workflowToken = workflowToken;
+    this.workflowProgramInfo = workflowProgramInfo;
+    this.systemDatasetInstantiator = new SystemDatasetInstantiator(dsFramework, programClassLoader, getOwners());
+    this.admin = new DefaultAdmin(dsFramework, programId.getNamespace().toEntityId());
+
+
+    Map<String, String> runtimeArgs = new HashMap<>(runtimeArguments);
+    this.logicalStartTime = ProgramRunners.updateLogicalStartTime(runtimeArgs);
+    this.runtimeArguments = Collections.unmodifiableMap(runtimeArgs);
   }
 
   @Override
@@ -132,7 +148,7 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
 
   @Override
   public ServiceDiscoverer getServiceDiscoverer() {
-    return new SparkServiceDiscoverer(getProgramId(), discoveryServiceClient);
+    return new SparkServiceDiscoverer(getProgramId().toEntityId(), discoveryServiceClient);
   }
 
   @Override
@@ -142,7 +158,7 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
 
   @Override
   public PluginContext getPluginContext() {
-    return new SparkPluginContext(pluginInstantiator, programId, applicationSpecification.getPlugins());
+    return new SparkPluginContext(pluginInstantiator, programId.toEntityId(), applicationSpecification.getPlugins());
   }
 
   @Override
@@ -190,7 +206,7 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
   @Nullable
   @Override
   public WorkflowToken getWorkflowToken() {
-    return workflowToken;
+    return workflowProgramInfo == null ? null : workflowProgramInfo.getWorkflowToken();
   }
 
   @Override
@@ -261,6 +277,14 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
   }
 
   /**
+   * Returns the {@link WorkflowProgramInfo} for this context or null if not running inside workflow.
+   */
+  @Nullable
+  public WorkflowProgramInfo getWorkflowProgramInfo() {
+    return workflowProgramInfo;
+  }
+
+  /**
    * Returns the {@link LoggingContext} for this context.
    */
   public LoggingContext getLoggingContext() {
@@ -293,7 +317,8 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
    * the given program execution context.
    */
   protected static MetricsContext createMetricsContext(MetricsCollectionService service,
-                                                       Id.Program programId, RunId runId) {
+                                                       Id.Program programId, RunId runId,
+                                                       @Nullable WorkflowProgramInfo workflowProgramInfo) {
     Map<String, String> tags = Maps.newHashMap();
     tags.put(Constants.Metrics.Tag.NAMESPACE, programId.getNamespaceId());
     tags.put(Constants.Metrics.Tag.APP, programId.getApplicationId());
@@ -303,7 +328,20 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
     // todo: use proper spark instance id. For now we have to emit smth for test framework's waitFor metric to work
     tags.put(Constants.Metrics.Tag.INSTANCE_ID, "0");
 
-    return service.getContext(tags);
+    MetricsContext programMetricsContext = service.getContext(tags);
+    if (workflowProgramInfo == null) {
+      return programMetricsContext;
+    }
+
+    // If running inside Workflow, add the WorkflowMetricsContext as well
+    tags = Maps.newHashMap();
+    tags.put(Constants.Metrics.Tag.NAMESPACE, programId.getNamespaceId());
+    tags.put(Constants.Metrics.Tag.APP, programId.getApplicationId());
+    tags.put(Constants.Metrics.Tag.WORKFLOW, workflowProgramInfo.getName());
+    tags.put(Constants.Metrics.Tag.RUN_ID, workflowProgramInfo.getRunId().getId());
+    tags.put(Constants.Metrics.Tag.NODE, workflowProgramInfo.getNodeId());
+
+    return new MultiMetricsContext(programMetricsContext, service.getContext(tags));
   }
 
   /**
@@ -313,4 +351,10 @@ public abstract class AbstractSparkContext implements SparkContext, Closeable {
     return new SparkLoggingContext(programId.getNamespaceId(), programId.getApplicationId(),
                                    programId.getId(), runId.getId());
   }
+
+  @Override
+  public Admin getAdmin() {
+    return admin;
+  }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright © 2015 Cask Data, Inc.
+ * Copyright © 2015-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -35,11 +35,9 @@ import co.cask.cdap.api.metrics.MetricsContext;
 import co.cask.cdap.api.spark.SparkContext;
 import co.cask.cdap.api.spark.SparkProgram;
 import co.cask.cdap.api.spark.SparkSpecification;
-import co.cask.cdap.api.workflow.WorkflowToken;
 import co.cask.cdap.common.conf.ConfigurationUtil;
 import co.cask.cdap.common.logging.LoggingContext;
 import co.cask.cdap.common.options.UnsupportedOptionTypeException;
-import co.cask.cdap.data.dataset.SystemDatasetInstantiator;
 import co.cask.cdap.data.stream.StreamInputFormat;
 import co.cask.cdap.data.stream.StreamUtils;
 import co.cask.cdap.data2.dataset2.DatasetFramework;
@@ -53,6 +51,7 @@ import co.cask.cdap.internal.app.runtime.batch.dataset.DatasetInputFormatProvide
 import co.cask.cdap.internal.app.runtime.batch.dataset.DatasetOutputFormatProvider;
 import co.cask.cdap.internal.app.runtime.batch.dataset.ForwardingSplitReader;
 import co.cask.cdap.internal.app.runtime.plugin.PluginInstantiator;
+import co.cask.cdap.internal.app.runtime.workflow.WorkflowProgramInfo;
 import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.id.NamespaceId;
 import co.cask.tephra.Transaction;
@@ -109,7 +108,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
    */
   public ExecutionSparkContext(ApplicationSpecification appSpec,
                                SparkSpecification specification, Id.Program programId, RunId runId,
-                               ClassLoader programClassLoader, long logicalStartTime,
+                               ClassLoader programClassLoader,
                                Map<String, String> runtimeArguments,
                                Transaction transaction, DatasetFramework datasetFramework,
                                TransactionSystemClient txClient,
@@ -118,12 +117,12 @@ public class ExecutionSparkContext extends AbstractSparkContext {
                                Configuration hConf, StreamAdmin streamAdmin,
                                Map<String, File> localizedResources,
                                @Nullable PluginInstantiator pluginInstantiator,
-                               @Nullable WorkflowToken workflowToken) {
-    this(appSpec, specification, programId, runId, programClassLoader, logicalStartTime, runtimeArguments,
+                               @Nullable WorkflowProgramInfo workflowProgramInfo) {
+    this(appSpec, specification, programId, runId, programClassLoader, runtimeArguments,
          transaction, datasetFramework, txClient, discoveryServiceClient,
-         createMetricsContext(metricsCollectionService, programId, runId),
+         createMetricsContext(metricsCollectionService, programId, runId, workflowProgramInfo),
          createLoggingContext(programId, runId), hConf, streamAdmin, localizedResources, pluginInstantiator,
-         workflowToken);
+         workflowProgramInfo);
   }
 
   /**
@@ -131,7 +130,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
    */
   public ExecutionSparkContext(ApplicationSpecification appSpec,
                                SparkSpecification specification, Id.Program programId, RunId runId,
-                               ClassLoader programClassLoader, long logicalStartTime,
+                               ClassLoader programClassLoader,
                                Map<String, String> runtimeArguments,
                                Transaction transaction, DatasetFramework datasetFramework,
                                TransactionSystemClient txClient,
@@ -140,17 +139,17 @@ public class ExecutionSparkContext extends AbstractSparkContext {
                                Configuration hConf, StreamAdmin streamAdmin,
                                Map<String, File> localizedResources,
                                @Nullable PluginInstantiator pluginInstantiator,
-                               @Nullable WorkflowToken workflowToken) {
-    super(appSpec, specification, programId, runId, programClassLoader, logicalStartTime,
-          runtimeArguments, discoveryServiceClient, metricsContext, loggingContext,
-          pluginInstantiator, workflowToken);
+                               @Nullable WorkflowProgramInfo workflowProgramInfo) {
+    super(appSpec, specification, programId, runId, programClassLoader,
+          runtimeArguments, discoveryServiceClient, metricsContext, loggingContext, datasetFramework,
+          pluginInstantiator, workflowProgramInfo);
     this.datasets = new HashMap<>();
     this.contextConfig = new SparkContextConfig(hConf);
     this.transaction = transaction;
     this.streamAdmin = streamAdmin;
-    this.datasetCache = new SingleThreadDatasetCache(
-      new SystemDatasetInstantiator(datasetFramework, programClassLoader, getOwners()),
-      txClient, new NamespaceId(programId.getNamespace().getId()), runtimeArguments, getMetricsContext(), null);
+    this.datasetCache = new SingleThreadDatasetCache(systemDatasetInstantiator, txClient,
+                                                     new NamespaceId(programId.getNamespace().getId()),
+                                                     runtimeArguments, getMetricsContext(), null);
     this.localizedResources = localizedResources;
   }
 
@@ -158,7 +157,8 @@ public class ExecutionSparkContext extends AbstractSparkContext {
   public <T> T readFromDataset(String datasetName, Class<?> kClass, Class<?> vClass, Map<String, String> userDsArgs) {
     Map<String, String> dsArgs = RuntimeArguments.extractScope(Scope.DATASET, datasetName, getRuntimeArguments());
     dsArgs.putAll(userDsArgs);
-    Dataset dataset = instantiateDataset(datasetName, dsArgs);
+
+    Dataset dataset = instantiateDataset(datasetName, dsArgs, AccessType.READ);
 
     try {
       InputFormatProvider inputFormatProvider = new DatasetInputFormatProvider(datasetName, dsArgs, dataset, null,
@@ -176,7 +176,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
         Class<? extends InputFormat> inputFormatClass =
           (Class<? extends InputFormat>) SparkClassLoader.findFromContext().loadClass(inputFormatName);
 
-        // Clone the configuration since it's dataset specification and shouldn't affect the global hConf
+        // Clone the configuration since its dataset specification and shouldn't affect the global hConf
         Configuration configuration = new Configuration(contextConfig.getConfiguration());
         ConfigurationUtil.setAll(inputFormatProvider.getInputFormatConfiguration(), configuration);
         return getSparkFacade().createRDD(inputFormatClass, kClass, vClass, configuration);
@@ -197,7 +197,8 @@ public class ExecutionSparkContext extends AbstractSparkContext {
                                  Map<String, String> userDsArgs) {
     Map<String, String> dsArgs = RuntimeArguments.extractScope(Scope.DATASET, datasetName, getRuntimeArguments());
     dsArgs.putAll(userDsArgs);
-    Dataset dataset = instantiateDataset(datasetName, dsArgs);
+
+    Dataset dataset = instantiateDataset(datasetName, dsArgs, AccessType.WRITE);
 
     try {
       OutputFormatProvider outputFormatProvider = new DatasetOutputFormatProvider(datasetName, dsArgs, dataset,
@@ -216,7 +217,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
           (Class<? extends OutputFormat>) SparkClassLoader.findFromContext().loadClass(outputFormatName);
 
         try {
-          // Clone the configuration since it's dataset specification and shouldn't affect the global hConf
+          // Clone the configuration since its dataset specification and shouldn't affect the global hConf
           Configuration configuration = new Configuration(contextConfig.getConfiguration());
           ConfigurationUtil.setAll(outputFormatProvider.getOutputFormatConfiguration(), configuration);
           getSparkFacade().saveAsDataset(rdd, outputFormatClass, kClass, vClass, configuration);
@@ -246,7 +247,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
   @Override
   public <T> T readFromStream(StreamBatchReadable stream, Class<?> vClass) {
     try {
-      // Clone the configuration since it's dataset specification and shouldn't affect the global hConf
+      // Clone the configuration since its dataset specification and shouldn't affect the global hConf
       Configuration configuration = configureStreamInput(new Configuration(contextConfig.getConfiguration()),
                                                          stream, vClass);
       T streamRDD = getSparkFacade().createRDD(StreamInputFormat.class, LongWritable.class, vClass, configuration);
@@ -344,7 +345,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
    * @throws IllegalArgumentException if the dataset does not implement BatchReadable
    */
   <K, V> BatchReadable<K, V> getBatchReadable(final String datasetName, Map<String, String> arguments) {
-    final Dataset dataset = instantiateDataset(datasetName, arguments);
+    final Dataset dataset = instantiateDataset(datasetName, arguments, AccessType.READ);
     Preconditions.checkArgument(dataset instanceof BatchReadable, "Dataset %s of type %s does not implements %s",
                                 datasetName, dataset.getClass().getName(), BatchReadable.class.getName());
 
@@ -390,7 +391,7 @@ public class ExecutionSparkContext extends AbstractSparkContext {
    * @throws IllegalArgumentException if the dataset does not implement BatchWritable
    */
   <K, V> CloseableBatchWritable<K, V> getBatchWritable(final String datasetName, Map<String, String> arguments) {
-    final Dataset dataset = instantiateDataset(datasetName, arguments);
+    final Dataset dataset = instantiateDataset(datasetName, arguments, AccessType.WRITE);
     Preconditions.checkArgument(dataset instanceof BatchWritable, "Dataset %s of type %s does not implements %s",
                                 datasetName, dataset.getClass().getName(), BatchWritable.class.getName());
 
@@ -497,8 +498,16 @@ public class ExecutionSparkContext extends AbstractSparkContext {
    * Creates a new instance of dataset.
    */
   private <T extends Dataset> T instantiateDataset(String datasetName, Map<String, String> arguments) {
+    return instantiateDataset(datasetName, arguments, AccessType.UNKNOWN);
+  }
+
+  /**
+   * Creates a new instance of dataset, with the specified accessType.
+   */
+  private <T extends Dataset> T instantiateDataset(String datasetName, Map<String, String> arguments,
+                                                   AccessType accessType) {
     // bypass = true, so that the dataset is not added to the factory's cache etc.
-    T dataset = datasetCache.getDataset(datasetName, arguments, true);
+    T dataset = datasetCache.getDataset(datasetName, arguments, true, accessType);
 
     // Provide the current long running transaction to the given dataset.
     if (dataset instanceof TransactionAware) {

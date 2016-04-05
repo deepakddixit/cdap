@@ -1,5 +1,5 @@
 /*
- * Copyright © 2014-2015 Cask Data, Inc.
+ * Copyright © 2014-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -16,25 +16,15 @@
 package co.cask.cdap.internal.app.runtime.workflow;
 
 import co.cask.cdap.api.app.ApplicationSpecification;
-import co.cask.cdap.api.mapreduce.MapReduceContext;
 import co.cask.cdap.api.mapreduce.MapReduceSpecification;
-import co.cask.cdap.api.workflow.Value;
+import co.cask.cdap.api.workflow.WorkflowNodeState;
 import co.cask.cdap.api.workflow.WorkflowSpecification;
 import co.cask.cdap.api.workflow.WorkflowToken;
 import co.cask.cdap.app.program.Program;
-import co.cask.cdap.app.runtime.ProgramController;
 import co.cask.cdap.app.runtime.ProgramOptions;
 import co.cask.cdap.app.runtime.ProgramRunnerFactory;
-import co.cask.cdap.internal.app.runtime.batch.MapReduceProgramController;
-import co.cask.cdap.proto.ProgramType;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
-import org.apache.hadoop.mapreduce.Counter;
-import org.apache.hadoop.mapreduce.CounterGroup;
-import org.apache.hadoop.mapreduce.Counters;
-import org.apache.hadoop.mapreduce.Job;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -44,8 +34,8 @@ final class MapReduceProgramWorkflowRunner extends AbstractProgramWorkflowRunner
 
   MapReduceProgramWorkflowRunner(WorkflowSpecification workflowSpec, ProgramRunnerFactory programRunnerFactory,
                                  Program workflowProgram, ProgramOptions workflowProgramOptions, WorkflowToken token,
-                                 String nodeId) {
-    super(workflowProgram, workflowProgramOptions, programRunnerFactory, workflowSpec, token, nodeId);
+                                 String nodeId, Map<String, WorkflowNodeState> nodeStates) {
+    super(workflowProgram, workflowProgramOptions, programRunnerFactory, workflowSpec, token, nodeId, nodeStates);
   }
 
   /**
@@ -66,47 +56,5 @@ final class MapReduceProgramWorkflowRunner extends AbstractProgramWorkflowRunner
 
     final Program mapReduceProgram = new WorkflowMapReduceProgram(workflowProgram, mapReduceSpec);
     return getProgramRunnable(name, mapReduceProgram);
-  }
-
-  /**
-   * Executes given {@link Program} with the given {@link ProgramOptions} and block until it completed.
-   *
-   * @throws Exception if execution failed.
-   */
-  @Override
-  public void runAndWait(Program program, ProgramOptions options) throws Exception {
-    ProgramController controller = programRunnerFactory.create(ProgramType.MAPREDUCE).run(program, options);
-    if (controller instanceof MapReduceProgramController) {
-      MapReduceContext context = ((MapReduceProgramController) controller).getContext();
-      executeProgram(controller, context);
-      updateWorkflowToken(context);
-    } else {
-      throw new IllegalStateException("Failed to run program. The controller is not an instance of " +
-                                        "MapReduceProgramController");
-    }
-  }
-
-  private void updateWorkflowToken(MapReduceContext context) throws Exception {
-    Map<String, Map<String, Long>> mapReduceCounters = Maps.newHashMap();
-    WorkflowToken workflowTokenFromContext = context.getWorkflowToken();
-
-    if (workflowTokenFromContext == null) {
-      throw new IllegalStateException("WorkflowToken cannot be null when the " +
-                                        "MapReduce program is started by Workflow.");
-    }
-
-    Counters counters = ((Job) context.getHadoopJob()).getCounters();
-    for (CounterGroup group : counters) {
-      mapReduceCounters.put(group.getName(), new HashMap<String, Long>());
-      for (Counter counter : group) {
-        mapReduceCounters.get(group.getName()).put(counter.getName(), counter.getValue());
-        ((BasicWorkflowToken) workflowTokenFromContext).put(group.getName() + "." + counter.getName(),
-                                                            Value.of(counter.getValue()),
-                                                            WorkflowToken.Scope.SYSTEM);
-      }
-    }
-
-    ((BasicWorkflowToken) workflowTokenFromContext).setMapReduceCounters(mapReduceCounters);
-    ((BasicWorkflowToken) token).mergeToken((BasicWorkflowToken) workflowTokenFromContext);
   }
 }

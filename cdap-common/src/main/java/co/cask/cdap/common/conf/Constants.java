@@ -42,6 +42,9 @@ public final class Constants {
   public static final String ROOT_NAMESPACE = "root.namespace";
   public static final String COLLECT_CONTAINER_LOGS = "master.collect.containers.log";
   public static final String COLLECT_APP_CONTAINER_LOG_LEVEL = "master.collect.app.containers.log.level";
+  public static final String HTTP_CLIENT_TIMEOUT_MS = "http.client.connection.timeout.ms";
+  /** Uniquely identifies a CDAP instance */
+  public static final String INSTANCE_NAME = "instance.name";
 
   /**
    * Configuration for Master startup.
@@ -124,6 +127,7 @@ public final class Constants {
     public static final String PROGRAM_RUNID_CORRECTOR_INTERVAL_SECONDS = "app.program.runid.corrector.interval";
     public static final String SYSTEM_ARTIFACTS_DIR = "app.artifact.dir";
     public static final String PROGRAM_EXTRA_CLASSPATH = "app.program.extra.classpath";
+    public static final String SPARK_YARN_CLIENT_REWRITE = "app.program.spark.yarn.client.rewrite.enabled";
 
     /**
      * Guice named bindings.
@@ -339,6 +343,7 @@ public final class Constants {
     public static final int HBASE_WRITE_BUFFER_SIZE = 4 * 1024 * 1024;
 
     public static final String URL_PREFIX = "stream://";
+    public static final String DESCRIPTION = "stream.description";
 
     /**
      * Contains HTTP headers used by Stream handler.
@@ -506,6 +511,7 @@ public final class Constants {
       public static final String MR_TASK_TYPE = "mrt";
 
       public static final String WORKFLOW = "wf";
+      public static final String NODE = "nd";
 
       public static final String SPARK = "sp";
 
@@ -679,8 +685,11 @@ public final class Constants {
     public static final class Authorization {
       /** Enables authorization */
       public static final String ENABLED = "security.authorization.enabled";
-      /** AuthorizationPlugin class name */
-      public static final String HANDLER_CLASS = "security.authorization.pluginClassName";
+      /** Extension jar path */
+      public static final String EXTENSION_JAR_PATH = "security.authorization.extension.jar.path";
+      /** Prefix for extension properties */
+      public static final String EXTENSION_CONFIG_PREFIX =
+        "security.authorization.extension.config.";
     }
 
     /**
@@ -925,5 +934,13 @@ public final class Constants {
     public static final String UPDATES_PUBLISH_ENABLED = "metadata.updates.publish.enabled";
     public static final String UPDATES_KAFKA_BROKER_LIST = "metadata.updates.kafka.broker.list";
     public static final String MAX_CHARS_ALLOWED = "metadata.max.allowed.chars";
+  }
+
+  /**
+   * Constants for publishing audit
+   */
+  public static final class Audit {
+    public static final String ENABLED = "audit.enabled";
+    public static final String KAFKA_TOPIC = "audit.kafka.topic";
   }
 }

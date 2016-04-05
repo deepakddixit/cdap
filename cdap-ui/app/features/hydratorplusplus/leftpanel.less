@@ -1,0 +1,337 @@
+/*
+ * Copyright © 2015 Cask Data, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
+@import '../../styles/variables.less';
+@import "../../../bower_components/bootstrap/less/mixins.less";
+@import '../../styles/themes/cdap/mixins.less';
+
+body.theme-cdap.state-hydratorplusplus-create {
+  .left-panel-wrapper {
+    position: fixed;
+    top: 50px;
+    bottom: 53px;
+    left: 0;
+    z-index: 1024;
+    width: 130px;
+    vertical-align: top;
+    background: #E8E8E8;
+    .transition(all 0.2s ease);
+    @media (max-width: @screen-xs-max) {
+      bottom: 75px;
+    }
+    + .right-wrapper {
+      margin-left: 130px;
+      height: 100%;
+      position: relative;
+      .transition(all 0.2s ease);
+    }
+    .left-panel {
+      .left-top-section {
+        height: 69px;
+        padding: 12px 0;
+        background: white;
+        border: 1px solid #dddddd;
+        border-top: 0;
+        border-left: 0;
+        border-bottom: 0;
+        select.form-control {
+          width: 87%;
+          margin-left: 10px;
+          color: white;
+          background: #098BF9;
+        }
+        .import-section {
+          padding-left: 10px;
+          margin-top: 3px;
+
+          strong {
+            font-size: 12px;
+            &:last-child {
+              margin-left: 20px;
+            }
+            a {
+              text-decoration: none;
+              color: #BEBEBE;
+              &:focus {
+                outline: 0;
+              }
+            }
+          }
+        }
+      }
+      my-side-panel {
+        display: block;
+        padding-top: 10px;
+        border-right: 1px solid #dddddd;
+        border-top: 1px solid #dddddd;
+        height: ~"calc(100% - 73px)"; // footer = 53px, 30px (import, templates & add plugin buttons on top of the side-panel.)
+
+        .groups-container {
+          position: static;
+          margin-top: 10px;
+          border-top: 1px solid #D4D4D4;
+          height: ~"calc(100% - 40px);" // 100% - height of filter textbox + margin-top 10px;
+        }
+      }
+    }
+    &.expanded {
+      width: 290px;
+      .item .plugin-item {
+        text-align: left;
+        width: 48%;
+        position: relative;
+
+        .name {
+          display: inline-block;
+          max-width: 81px;
+        }
+        .plugin-badge {
+          display: none;
+        }
+        &.plugin-templates{
+          .plugin-badge {
+            display: block;
+            font-size: 8px;
+            position: absolute;
+            left: 110px;
+            background: #D8D8D8;
+            border-radius: 2px;
+            margin: 0;
+            padding: 3px 3px;
+            line-height: 8px;
+            top: 3px;
+          }
+        }
+      }
+      + .right-wrapper {
+        margin-left: 290px;
+      }
+    }
+    .hydrator-filter {
+      padding: 0 0 0 10px;
+      input {
+        background-color: #BEBEBE;
+        border: 0;
+        color: white;
+        height: 35px;
+        width: 75%;
+        box-shadow: none;
+        .border-radius(5px);
+        .placeholder-color(white);
+      }
+    }
+    .item {
+      color: @cdap-lightgray;
+      font-size: 14px;
+
+      &.group-default {
+        height: 33%;
+        position: relative;
+
+        .item-body-wrapper {
+          bottom: 0;
+          top: 40px;
+          overflow-y: auto;
+          position: absolute;
+          bottom: 0;
+          top: 40px;
+          width: 100%;
+        }
+      }
+      .item-body, .item-heading {
+        .name {
+          display: inline-block;
+          vertical-align: top;
+          overflow-x: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-weight: 500;
+        }
+      }
+
+      &.item-open {
+
+        .item-heading {
+          border-bottom-color: transparent;
+        }
+        + .item {
+          .transform {
+            position: absolute;
+            bottom: 40px;
+          }
+          + .item .sink {
+            position: absolute;
+            bottom: 0;
+          }
+        }
+        .transform {
+          position: static;
+        }
+        + .item .sink {
+          position: absolute;
+          bottom: 0;
+        }
+        .sink {
+          position: static;
+        }
+
+        .item-body-wrapper {
+          // Syntax needed to avoid LESS parsing issue affecting calc()
+          height: ~"-moz-calc(100% - 40px)";
+          height: ~"-webkit-calc(100% - 40px)";
+          height: ~"calc(100% - 40px)";
+        }
+      }
+
+      .item-heading {
+        color: black;
+        font-weight: bold;
+        padding: 0 15px 0 10px;
+        height: 40px;
+        line-height: 40px;
+        width: 100%;
+        border-bottom: 1px solid #CBCBCB;
+        span.name {
+          font-size: 13px;
+          line-height: inherit;
+        }
+      }
+      .item-body-wrapper {
+        overflow-y: auto;
+        border-top: 1px solid #CBCBCB;
+        border-bottom: 1px solid #CBCBCB;
+      }
+      .item-body {
+        padding: 10px 10px 0;
+        .flexbox();
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        // Adjust max height to prevent side panel from becoming unusable below a certain browser height
+        @media (max-height: 550px) {
+          max-height: 20vh;
+        }
+        .no-item-message {
+          width: 100%;
+        }
+      }
+      .plugin-item {
+        background-color: white;
+        border: 1px solid transparent;
+        color: #666;
+        line-height: 30px;
+        margin-bottom: 6px;
+        padding: 0 8px;
+        height: 30px;
+        width: 48%;
+        border: 1px solid #dddddd;
+        .border-radius(4px);
+        > .fa {
+          font-size: 12px;
+          width: 18px;
+          line-height: 30px;
+          vertical-align: top;
+        }
+        .name {
+          display: none;
+          font-size: 11px;
+        }
+      }
+    }
+    .badge {
+      background-color: transparent;
+      color: #666;
+      vertical-align: text-bottom;
+      &:before, &:after {
+        padding: 2px;
+      }
+      &:before{
+        content: "(";
+      }
+      &:after {
+        content: ")";
+      }
+    }
+  }
+
+  .my-cdap-popover {
+    padding: 0;
+    outline: none;
+    border-radius: 0;
+
+    .arrow {
+      border-right-color: black;
+
+      &:after {
+        border-right-color: black;
+      }
+    }
+    &:focus { outline: none; }
+
+    .popover-content {
+      padding: 5px;
+      background: black;
+
+      .list-group {
+        margin: 0;
+        .list-group-item {
+          padding: 4px 4px;
+          border: 0;
+          background: black;
+          color: white;
+          h6 {
+            &:not(:first-child) {
+              margin-left: 5px;
+
+              a {
+                text-decoration: none;
+                &:not(:last-child) {
+                  margin-right: 5px;
+                }
+              }
+            }
+          }
+          h5,h6 {
+            margin:0;
+            font-weight: bold;
+            display: inline-block;
+            a {
+              text-decoration: none;
+              margin-left: 3px;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  .modal {
+    &.plugin-templates-modal {
+      plugin-templates {
+        display: block;
+        overflow-y: auto;
+        overflow-x: hidden;
+
+        h3 {
+          strong {
+            word-break: break-all;
+          }
+        }
+      }
+    }
+  }
+}

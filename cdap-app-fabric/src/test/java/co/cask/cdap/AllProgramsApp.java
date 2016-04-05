@@ -28,6 +28,7 @@ import co.cask.cdap.api.common.Bytes;
 import co.cask.cdap.api.data.DatasetContext;
 import co.cask.cdap.api.data.schema.UnsupportedTypeException;
 import co.cask.cdap.api.data.stream.Stream;
+import co.cask.cdap.api.dataset.DatasetProperties;
 import co.cask.cdap.api.dataset.lib.KeyValueTable;
 import co.cask.cdap.api.dataset.lib.ObjectMappedTable;
 import co.cask.cdap.api.dataset.lib.ObjectMappedTableProperties;
@@ -78,6 +79,8 @@ public class AllProgramsApp extends AbstractApplication {
   public static final String NAME = "App";
   public static final String STREAM_NAME = "stream";
   public static final String DATASET_NAME = "kvt";
+  public static final String DATASET_NAME2 = "kvt2";
+  public static final String DATASET_NAME3 = "kvt3";
   public static final String PLUGIN_DESCRIPTION = "test plugin";
   public static final String PLUGIN_NAME = "mytestplugin";
   public static final String PLUGIN_TYPE = "testplugin";
@@ -89,10 +92,14 @@ public class AllProgramsApp extends AbstractApplication {
   public void configure() {
     setName(NAME);
     setDescription("Application which has everything");
-    addStream(new Stream(STREAM_NAME));
-    createDataset(DATASET_NAME, KeyValueTable.class);
+    addStream(new Stream(STREAM_NAME, "test stream"));
+    createDataset(DATASET_NAME, KeyValueTable.class,
+                  DatasetProperties.builder().setDescription("test dataset").build());
+    createDataset(DATASET_NAME2, KeyValueTable.class);
+    createDataset(DATASET_NAME3, KeyValueTable.class);
     addFlow(new NoOpFlow());
     addMapReduce(new NoOpMR());
+    addMapReduce(new NoOpMR2());
     addWorkflow(new NoOpWorkflow());
     addWorker(new NoOpWorker());
     addSpark(new NoOpSpark());
@@ -103,7 +110,11 @@ public class AllProgramsApp extends AbstractApplication {
                      NoOpWorkflow.NAME);
     try {
       createDataset(DS_WITH_SCHEMA_NAME, ObjectMappedTable.class,
-                    ObjectMappedTableProperties.builder().setType(DsSchema.class).build());
+                    ObjectMappedTableProperties.builder()
+                      .setType(DsSchema.class)
+                      .setDescription("test object mapped table")
+                      .build()
+      );
     } catch (UnsupportedTypeException e) {
       // ignore for test
     }
@@ -173,6 +184,20 @@ public class AllProgramsApp extends AbstractApplication {
     }
   }
 
+  /**
+   * Similar to {@link NoOpMR}, but uses a dataset as input, instead of a stream.
+   */
+  public static class NoOpMR2 extends AbstractMapReduce {
+    public static final String NAME = "NoOpMR2";
+
+    @Override
+    protected void configure() {
+      setName(NAME);
+      setInputDataset(DATASET_NAME2);
+      setOutputDataset(DATASET_NAME);
+    }
+  }
+
   public static class NoOpMapper extends Mapper<LongWritable, BytesWritable, Text, Text>
     implements ProgramLifecycle<MapReduceContext> {
     @Override
@@ -181,7 +206,6 @@ public class AllProgramsApp extends AbstractApplication {
       Text output = new Text(value.copyBytes());
       context.write(output, output);
     }
-
     @Override
     public void initialize(MapReduceContext context) throws Exception {
       Object obj = context.newPluginInstance("mrid");
@@ -229,6 +253,13 @@ public class AllProgramsApp extends AbstractApplication {
 
       JavaPairRDD<byte[], byte[]> datasetRDD = context.readFromDataset(DATASET_NAME, byte[].class, byte[].class);
       LOG.info("Dataset pairs: {}", datasetRDD.count());
+
+      context.writeToDataset(datasetRDD, DATASET_NAME2, byte[].class, byte[].class);
+
+      datasetRDD = context.readFromDataset(DATASET_NAME3, byte[].class, byte[].class);
+      LOG.info("Dataset pairs: {}", datasetRDD.count());
+
+      context.writeToDataset(datasetRDD, DATASET_NAME3, byte[].class, byte[].class);
     }
   }
 
@@ -241,10 +272,10 @@ public class AllProgramsApp extends AbstractApplication {
 
     @Override
     public void configure() {
-        setName(NAME);
-        setDescription("NoOp Workflow description");
-        addAction(new NoOpAction());
-        addMapReduce(NoOpMR.NAME);
+      setName(NAME);
+      setDescription("NoOp Workflow description");
+      addAction(new NoOpAction());
+      addMapReduce(NoOpMR.NAME);
     }
   }
 

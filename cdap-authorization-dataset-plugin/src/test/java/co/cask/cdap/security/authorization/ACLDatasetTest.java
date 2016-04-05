@@ -1,5 +1,5 @@
 /*
- * Copyright © 2015 Cask Data, Inc.
+ * Copyright © 2015-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -19,10 +19,12 @@ package co.cask.cdap.security.authorization;
 import co.cask.cdap.api.dataset.DatasetProperties;
 import co.cask.cdap.api.dataset.table.Table;
 import co.cask.cdap.data2.dataset2.DatasetFrameworkTestUtil;
-import co.cask.cdap.proto.Id;
+import co.cask.cdap.proto.id.DatasetId;
 import co.cask.cdap.proto.id.Ids;
 import co.cask.cdap.proto.id.NamespaceId;
 import co.cask.cdap.proto.security.Action;
+import co.cask.cdap.proto.security.Principal;
+import co.cask.cdap.proto.security.Privilege;
 import co.cask.tephra.TransactionExecutor;
 import co.cask.tephra.TransactionFailureException;
 import com.google.common.collect.ImmutableSet;
@@ -33,32 +35,31 @@ import org.junit.ClassRule;
 import org.junit.Test;
 
 /**
- *
+ * Tests for {@link ACLDataset}.
  */
 public class ACLDatasetTest {
 
   @ClassRule
   public static DatasetFrameworkTestUtil dsFrameworkUtil = new DatasetFrameworkTestUtil();
 
-  private static final Id.DatasetInstance tabInstance =
-    Id.DatasetInstance.from(DatasetFrameworkTestUtil.NAMESPACE_ID, "tab");
+  private static final DatasetId tabInstance = new DatasetId("myspace", "tab");
   private static ACLDataset table;
 
   @BeforeClass
   public static void beforeClass() throws Exception {
-    dsFrameworkUtil.createInstance("table", tabInstance, DatasetProperties.EMPTY);
-    table = new ACLDataset((Table) dsFrameworkUtil.getInstance(tabInstance));
+    dsFrameworkUtil.createInstance("table", tabInstance.toId(), DatasetProperties.EMPTY);
+    table = new ACLDataset((Table) dsFrameworkUtil.getInstance(tabInstance.toId()));
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    dsFrameworkUtil.deleteInstance(tabInstance);
+    dsFrameworkUtil.deleteInstance(tabInstance.toId());
   }
 
   @Test
   public void testSearchAddRemove() throws InterruptedException, TransactionFailureException {
     final NamespaceId namespace = Ids.namespace("foo");
-    final String user = "alice";
+    final Principal user = new Principal("alice", Principal.PrincipalType.USER);
 
     TransactionExecutor txnl = dsFrameworkUtil.newTransactionExecutor(table);
 
@@ -74,6 +75,7 @@ public class ACLDatasetTest {
       public void apply() throws Exception {
         table.add(namespace, user, Action.READ);
         Assert.assertEquals(ImmutableSet.of(Action.READ), table.search(namespace, user));
+        Assert.assertEquals(ImmutableSet.of(new Privilege(namespace, Action.READ)), table.listPrivileges(user));
         table.remove(namespace, user, Action.READ);
         Assert.assertEquals(ImmutableSet.of(), table.search(namespace, user));
       }

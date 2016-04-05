@@ -20,7 +20,6 @@ import co.cask.cdap.api.app.ApplicationSpecification;
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.api.spark.Spark;
 import co.cask.cdap.api.spark.SparkSpecification;
-import co.cask.cdap.api.workflow.WorkflowToken;
 import co.cask.cdap.app.program.Program;
 import co.cask.cdap.app.runtime.Arguments;
 import co.cask.cdap.app.runtime.ProgramController;
@@ -40,9 +39,11 @@ import co.cask.cdap.internal.app.runtime.MetricsFieldSetter;
 import co.cask.cdap.internal.app.runtime.ProgramOptionConstants;
 import co.cask.cdap.internal.app.runtime.ProgramRunners;
 import co.cask.cdap.internal.app.runtime.plugin.PluginInstantiator;
-import co.cask.cdap.internal.app.runtime.workflow.BasicWorkflowToken;
+import co.cask.cdap.internal.app.runtime.workflow.NameMappedDatasetFramework;
+import co.cask.cdap.internal.app.runtime.workflow.WorkflowProgramInfo;
 import co.cask.cdap.internal.lang.Reflections;
 import co.cask.cdap.proto.Id;
+import co.cask.cdap.proto.ProgramRunStatus;
 import co.cask.cdap.proto.ProgramType;
 import co.cask.tephra.TransactionSystemClient;
 import com.google.common.base.Preconditions;
@@ -50,7 +51,6 @@ import com.google.common.base.Throwables;
 import com.google.common.io.Closeables;
 import com.google.common.reflect.TypeToken;
 import com.google.common.util.concurrent.Service;
-import com.google.gson.Gson;
 import com.google.inject.Inject;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
@@ -74,7 +74,6 @@ import javax.annotation.Nullable;
 public class SparkProgramRunner extends AbstractProgramRunnerWithPlugin {
 
   private static final Logger LOG = LoggerFactory.getLogger(SparkProgramRunner.class);
-  private static final Gson GSON = new Gson();
 
   private final DatasetFramework datasetFramework;
   private final Configuration hConf;
@@ -117,19 +116,15 @@ public class SparkProgramRunner extends AbstractProgramRunnerWithPlugin {
     Arguments arguments = options.getArguments();
     RunId runId = RunIds.fromString(arguments.getOption(ProgramOptionConstants.RUN_ID));
 
-    long logicalStartTime = arguments.hasOption(ProgramOptionConstants.LOGICAL_START_TIME)
-      ? Long.parseLong(arguments.getOption(ProgramOptionConstants.LOGICAL_START_TIME)) : System.currentTimeMillis();
-
-    WorkflowToken workflowToken = null;
-    if (arguments.hasOption(ProgramOptionConstants.WORKFLOW_TOKEN)) {
-      workflowToken = GSON.fromJson(arguments.getOption(ProgramOptionConstants.WORKFLOW_TOKEN),
-                                    BasicWorkflowToken.class);
-    }
+    WorkflowProgramInfo workflowInfo = WorkflowProgramInfo.create(arguments);
+    DatasetFramework programDatasetFramework = workflowInfo == null ?
+      datasetFramework :
+      NameMappedDatasetFramework.createFromWorkflowProgramInfo(datasetFramework, workflowInfo, appSpec);
 
     // Setup dataset framework context, if required
-    if (datasetFramework instanceof ProgramContextAware) {
+    if (programDatasetFramework instanceof ProgramContextAware) {
       Id.Program programId = program.getId();
-      ((ProgramContextAware) datasetFramework).initContext(new Id.Run(programId, runId.getId()));
+      ((ProgramContextAware) programDatasetFramework).initContext(new Id.Run(programId, runId.getId()));
     }
 
     List<Closeable> closeables = new ArrayList<>();
@@ -139,11 +134,11 @@ public class SparkProgramRunner extends AbstractProgramRunnerWithPlugin {
         closeables.add(pluginInstantiator);
       }
 
-      ClientSparkContext context = new ClientSparkContext(program, runId, logicalStartTime,
+      ClientSparkContext context = new ClientSparkContext(program, runId,
                                                           options.getUserArguments().asMap(),
-                                                          txSystemClient, datasetFramework,
+                                                          txSystemClient, programDatasetFramework,
                                                           discoveryServiceClient, metricsCollectionService,
-                                                          getPluginArchive(options), pluginInstantiator, workflowToken);
+                                                          getPluginArchive(options), pluginInstantiator, workflowInfo);
       closeables.add(context);
       Spark spark;
       try {
@@ -160,9 +155,10 @@ public class SparkProgramRunner extends AbstractProgramRunnerWithPlugin {
       }
 
       SparkSubmitter submitter = SparkContextConfig.isLocal(hConf) ? new LocalSparkSubmitter()
-        : new DistributedSparkSubmitter();
+        : new DistributedSparkSubmitter(options.getArguments().getOption(Constants.AppFabric.APP_SCHEDULER_QUEUE));
       Service sparkRuntimeService = new SparkRuntimeService(
-        cConf, hConf, spark, new SparkContextFactory(hConf, context, datasetFramework, txSystemClient, streamAdmin),
+        cConf, hConf, spark, new SparkContextFactory(hConf, context, programDatasetFramework,
+                                                     txSystemClient, streamAdmin),
         submitter, program.getJarLocation(), txSystemClient
       );
 
@@ -192,9 +188,6 @@ public class SparkProgramRunner extends AbstractProgramRunnerWithPlugin {
                                                         final List<Closeable> closeables) {
 
     final String twillRunId = arguments.getOption(ProgramOptionConstants.TWILL_RUN_ID);
-    final String workflowName = arguments.getOption(ProgramOptionConstants.WORKFLOW_NAME);
-    final String workflowNodeId = arguments.getOption(ProgramOptionConstants.WORKFLOW_NODE_ID);
-    final String workflowRunId = arguments.getOption(ProgramOptionConstants.WORKFLOW_RUN_ID);
 
     return new ServiceListenerAdapter() {
       @Override
@@ -205,35 +198,26 @@ public class SparkProgramRunner extends AbstractProgramRunnerWithPlugin {
           // If RunId is not time-based, use current time as start time
           startTimeInSeconds = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
         }
-
-        if (workflowName == null) {
-          store.setStart(programId, runId.getId(), startTimeInSeconds, twillRunId, userArgs.asMap(), arguments.asMap());
-        } else {
-          // Program started by Workflow
-          store.setWorkflowProgramStart(programId, runId.getId(), workflowName, workflowRunId, workflowNodeId,
-                                        startTimeInSeconds, twillRunId);
-        }
+        store.setStart(programId, runId.getId(), startTimeInSeconds, twillRunId, userArgs.asMap(), arguments.asMap());
       }
 
       @Override
       public void terminated(Service.State from) {
         closeAll(closeables);
+        ProgramRunStatus runStatus = ProgramController.State.COMPLETED.getRunStatus();
         if (from == Service.State.STOPPING) {
           // Service was killed
-          store.setStop(programId, runId.getId(), TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()),
-                        ProgramController.State.KILLED.getRunStatus());
-        } else {
-          // Service completed by itself.
-          store.setStop(programId, runId.getId(), TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()),
-                        ProgramController.State.COMPLETED.getRunStatus());
+          runStatus = ProgramController.State.KILLED.getRunStatus();
         }
+        store.setStop(programId, runId.getId(), TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()),
+                      runStatus);
       }
 
       @Override
-      public void failed(Service.State from, Throwable failure) {
+      public void failed(Service.State from, @Nullable Throwable failure) {
         closeAll(closeables);
         store.setStop(programId, runId.getId(), TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()),
-                      ProgramController.State.ERROR.getRunStatus());
+                      ProgramController.State.ERROR.getRunStatus(), failure);
       }
     };
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright © 2015 Cask Data, Inc.
+ * Copyright © 2015-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -22,14 +22,13 @@ import co.cask.cdap.api.dataset.Dataset;
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.api.spark.Spark;
 import co.cask.cdap.api.spark.SparkContext;
-import co.cask.cdap.api.workflow.WorkflowToken;
 import co.cask.cdap.app.program.Program;
-import co.cask.cdap.data.dataset.SystemDatasetInstantiator;
 import co.cask.cdap.data2.dataset2.DatasetFramework;
 import co.cask.cdap.data2.dataset2.DynamicDatasetCache;
 import co.cask.cdap.data2.dataset2.SingleThreadDatasetCache;
 import co.cask.cdap.internal.app.runtime.distributed.LocalizeResource;
 import co.cask.cdap.internal.app.runtime.plugin.PluginInstantiator;
+import co.cask.cdap.internal.app.runtime.workflow.WorkflowProgramInfo;
 import co.cask.cdap.proto.id.NamespaceId;
 import co.cask.tephra.TransactionContext;
 import co.cask.tephra.TransactionSystemClient;
@@ -55,23 +54,24 @@ public final class ClientSparkContext extends AbstractSparkContext {
   private final File pluginArchive;
   private final Map<String, LocalizeResource> resourcesToLocalize;
 
-  public ClientSparkContext(Program program, RunId runId, long logicalStartTime, Map<String, String> runtimeArguments,
+  public ClientSparkContext(Program program, RunId runId, Map<String, String> runtimeArguments,
                             TransactionSystemClient txClient, DatasetFramework datasetFramework,
                             DiscoveryServiceClient discoveryServiceClient,
                             MetricsCollectionService metricsCollectionService,
                             @Nullable File pluginArchive,
                             @Nullable PluginInstantiator pluginInstantiator,
-                            @Nullable WorkflowToken workflowToken) {
+                            @Nullable WorkflowProgramInfo workflowProgramInfo) {
     super(program.getApplicationSpecification(),
           program.getApplicationSpecification().getSpark().get(program.getName()),
-          program.getId(), runId, program.getClassLoader(), logicalStartTime,
+          program.getId(), runId, program.getClassLoader(),
           runtimeArguments, discoveryServiceClient,
-          createMetricsContext(metricsCollectionService, program.getId(), runId),
-          createLoggingContext(program.getId(), runId), pluginInstantiator, workflowToken);
+          createMetricsContext(metricsCollectionService, program.getId(), runId, workflowProgramInfo),
+          createLoggingContext(program.getId(), runId),
+          datasetFramework, pluginInstantiator, workflowProgramInfo);
 
-    this.datasetCache = new SingleThreadDatasetCache(
-      new SystemDatasetInstantiator(datasetFramework, program.getClassLoader(), getOwners()),
-      txClient, new NamespaceId(program.getId().getNamespace().getId()), runtimeArguments, getMetricsContext(), null);
+    NamespaceId namespaceId = program.getId().getNamespace().toEntityId();
+    this.datasetCache = new SingleThreadDatasetCache(systemDatasetInstantiator, txClient, namespaceId,
+                                                     runtimeArguments, getMetricsContext(), null);
     this.transactionContext = datasetCache.newTransactionContext();
     this.pluginArchive = pluginArchive;
     this.resourcesToLocalize = new HashMap<>();

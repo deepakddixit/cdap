@@ -18,6 +18,7 @@ package co.cask.cdap.data.runtime.main;
 
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.app.guice.AppFabricServiceRuntimeModule;
+import co.cask.cdap.app.guice.AuthorizationModule;
 import co.cask.cdap.app.guice.ProgramRunnerRuntimeModule;
 import co.cask.cdap.app.guice.ServiceStoreModules;
 import co.cask.cdap.app.store.ServiceStore;
@@ -43,6 +44,7 @@ import co.cask.cdap.data.runtime.DataSetServiceModules;
 import co.cask.cdap.data.runtime.DataSetsModules;
 import co.cask.cdap.data.stream.StreamAdminModules;
 import co.cask.cdap.data.view.ViewAdminModules;
+import co.cask.cdap.data2.audit.AuditModule;
 import co.cask.cdap.data2.datafabric.dataset.service.DatasetService;
 import co.cask.cdap.data2.util.hbase.ConfigurationTable;
 import co.cask.cdap.data2.util.hbase.HBaseTableUtil;
@@ -376,7 +378,9 @@ public class MasterServiceMain extends DaemonMain {
       new ViewAdminModules().getDistributedModules(),
       new StreamAdminModules().getDistributedModules(),
       new NamespaceClientRuntimeModule().getDistributedModules(),
-      new NamespaceStoreModule().getDistributedModules()
+      new NamespaceStoreModule().getDistributedModules(),
+      new AuditModule().getDistributedModules(),
+      new AuthorizationModule()
     );
   }
 

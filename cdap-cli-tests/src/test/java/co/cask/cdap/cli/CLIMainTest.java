@@ -17,9 +17,7 @@
 package co.cask.cdap.cli;
 
 import co.cask.cdap.StandaloneTester;
-import co.cask.cdap.cli.util.InstanceURIParser;
 import co.cask.cdap.cli.util.RowMaker;
-import co.cask.cdap.cli.util.table.CsvTableRenderer;
 import co.cask.cdap.cli.util.table.Table;
 import co.cask.cdap.client.DatasetTypeClient;
 import co.cask.cdap.client.NamespaceClient;
@@ -32,11 +30,9 @@ import co.cask.cdap.client.app.FakeSpark;
 import co.cask.cdap.client.app.FakeWorkflow;
 import co.cask.cdap.client.app.PingService;
 import co.cask.cdap.client.app.PrefixedEchoHandler;
-import co.cask.cdap.client.config.ClientConfig;
-import co.cask.cdap.client.config.ConnectionConfig;
 import co.cask.cdap.common.DatasetTypeNotFoundException;
 import co.cask.cdap.common.ProgramNotFoundException;
-import co.cask.cdap.common.UnauthorizedException;
+import co.cask.cdap.common.UnauthenticatedException;
 import co.cask.cdap.common.io.Locations;
 import co.cask.cdap.internal.test.AppJarHelper;
 import co.cask.cdap.proto.DatasetTypeMeta;
@@ -65,7 +61,6 @@ import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
-import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,13 +80,10 @@ import javax.annotation.Nullable;
  * Test for {@link CLIMain}.
  */
 @Category(XSlowTests.class)
-public class CLIMainTest {
+public class CLIMainTest extends CLITestBase {
 
   @ClassRule
   public static final StandaloneTester STANDALONE = new StandaloneTester();
-
-  @ClassRule
-  public static final TemporaryFolder TMP_FOLDER = new TemporaryFolder();
 
   private static final Logger LOG = LoggerFactory.getLogger(CLIMainTest.class);
   private static final Gson GSON = new Gson();
@@ -114,10 +106,7 @@ public class CLIMainTest {
 
   @BeforeClass
   public static void setUpClass() throws Exception {
-    ConnectionConfig connectionConfig = InstanceURIParser.DEFAULT.parse(STANDALONE.getBaseURI().toString());
-    ClientConfig clientConfig = new ClientConfig.Builder().setConnectionConfig(connectionConfig).build();
-    clientConfig.setAllTimeouts(60000);
-    cliConfig = new CLIConfig(clientConfig, System.out, new CsvTableRenderer());
+    cliConfig = createCLIConfig(STANDALONE.getBaseURI());
     LaunchOptions launchOptions = new LaunchOptions(LaunchOptions.DEFAULT.getUri(), true, true, false);
     cliMain = new CLIMain(launchOptions, cliConfig);
     programClient = new ProgramClient(cliConfig.getClientConfig());
@@ -283,9 +272,10 @@ public class CLIMainTest {
 
     DatasetTypeClient datasetTypeClient = new DatasetTypeClient(cliConfig.getClientConfig());
     DatasetTypeMeta datasetType = datasetTypeClient.list(Id.Namespace.DEFAULT).get(0);
-    testCommandOutputContains(cli, "create dataset instance " + datasetType.getName() + " " + datasetName,
+    testCommandOutputContains(cli, "create dataset instance " + datasetType.getName() + " " + datasetName + " \"a=1\"",
                               "Successfully created dataset");
     testCommandOutputContains(cli, "list dataset instances", FakeDataset.class.getSimpleName());
+    testCommandOutputContains(cli, "get dataset instance properties " + datasetName, "\"a\":\"1\"");
 
     NamespaceClient namespaceClient = new NamespaceClient(cliConfig.getClientConfig());
     Id.Namespace barspace = Id.Namespace.from("bar");
@@ -305,6 +295,14 @@ public class CLIMainTest {
     } finally {
       testCommandOutputContains(cli, "delete dataset instance " + datasetName, "Successfully deleted");
     }
+
+    String datasetName2 = PREFIX + "asoijm39485";
+    String description = "test-description-for-" + datasetName2;
+    testCommandOutputContains(cli, "create dataset instance " + datasetType.getName() + " " + datasetName2 +
+                                " \"a=1\"" + " " + description,
+                              "Successfully created dataset");
+    testCommandOutputContains(cli, "list dataset instances", description);
+    testCommandOutputContains(cli, "delete dataset instance " + datasetName2, "Successfully deleted");
   }
 
   @Test
@@ -425,12 +423,11 @@ public class CLIMainTest {
     testCommandOutputContains(cli, "load preferences instance " + file.getAbsolutePath() + " json", "invalid");
     testCommandOutputContains(cli, "load preferences instance " + file.getAbsolutePath() + " xml", "Unsupported");
 
-    testCommandOutputContains(cli, "set preferences namespace 'k1=v1'",
-            "successfully");
+    testCommandOutputContains(cli, "set preferences namespace 'k1=v1'", "successfully");
     testCommandOutputContains(cli, "set preferences namespace 'k1=v1' name",
-            "Error: Expected format: set preferences namespace <runtime-args>");
+                              "Error: Expected format: set preferences namespace <runtime-args>");
     testCommandOutputContains(cli, "set preferences instance 'k1=v1' name",
-            "Error: Expected format: set preferences instance <runtime-args>");
+                              "Error: Expected format: set preferences instance <runtime-args>");
 
   }
 
@@ -504,7 +501,7 @@ public class CLIMainTest {
     assertProgramStatus(programClient, fakeWorkflowId, "STOPPED");
     testCommandOutputContains(cli, "cli render as csv", "Now rendering as CSV");
     String commandOutput = getCommandOutput(cli, "get workflow runs " + workflow);
-    String [] lines = commandOutput.split("\\r?\\n");
+    String[] lines = commandOutput.split("\\r?\\n");
     Assert.assertEquals(2, lines.length);
     String[] split = lines[1].split(",");
     String runId = split[0];
@@ -606,6 +603,14 @@ public class CLIMainTest {
     expected = ImmutableList.of("Entity", fakeFlowId.toString(), pingServiceId.toString(),
                                 prefixedEchoHandlerId.toString());
     Assert.assertTrue(lines.containsAll(expected) && expected.containsAll(lines));
+    output = getCommandOutput(cli, "search metadata fake* filtered by target-type dataset,stream");
+    lines = Arrays.asList(output.split("\\r?\\n"));
+    expected = ImmutableList.of("Entity", fakeDsId.toString(), fakeStreamId.toString());
+    Assert.assertTrue(lines.containsAll(expected) && expected.containsAll(lines));
+    output = getCommandOutput(cli, "search metadata fake* filtered by target-type dataset,stream,app");
+    lines = Arrays.asList(output.split("\\r?\\n"));
+    expected = ImmutableList.of("Entity", fakeDsId.toString(), fakeStreamId.toString(), fakeAppId.toString());
+    Assert.assertTrue(lines.containsAll(expected) && expected.containsAll(lines));
   }
 
   private static File createAppJarFile(Class<?> cls) throws IOException {
@@ -618,46 +623,8 @@ public class CLIMainTest {
     return appJarFile;
   }
 
-  private static void testCommandOutputContains(CLI cli, String command, final String expectedOutput) throws Exception {
-    testCommand(cli, command, new Function<String, Void>() {
-      @Nullable
-      @Override
-      public Void apply(@Nullable String output) {
-        Assert.assertTrue(String.format("Expected output '%s' to contain '%s'", output, expectedOutput),
-                          output != null && output.contains(expectedOutput));
-        return null;
-      }
-    });
-  }
-
-  private static void testCommandOutputNotContains(CLI cli, String command,
-                                                   final String expectedOutput) throws Exception {
-    testCommand(cli, command, new Function<String, Void>() {
-      @Nullable
-      @Override
-      public Void apply(@Nullable String output) {
-        Assert.assertTrue(String.format("Expected output '%s' to not contain '%s'", output, expectedOutput),
-                          output != null && !output.contains(expectedOutput));
-        return null;
-      }
-    });
-  }
-
-  private static void testCommand(CLI cli, String command, Function<String, Void> outputValidator) throws Exception {
-    String output = getCommandOutput(cli, command);
-    outputValidator.apply(output);
-  }
-
-  private static String getCommandOutput(CLI cli, String command) throws Exception {
-    try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-    PrintStream printStream = new PrintStream(outputStream)) {
-      cli.execute(command, printStream);
-      return outputStream.toString();
-    }
-  }
-
   protected void assertProgramStatus(ProgramClient programClient, Id.Program programId, String programStatus, int tries)
-    throws IOException, ProgramNotFoundException, UnauthorizedException {
+    throws IOException, ProgramNotFoundException, UnauthenticatedException {
 
     String status;
     int numTries = 0;
@@ -674,7 +641,7 @@ public class CLIMainTest {
   }
 
   protected void assertProgramStatus(ProgramClient programClient, Id.Program programId, String programStatus)
-    throws IOException, ProgramNotFoundException, UnauthorizedException {
+    throws IOException, ProgramNotFoundException, UnauthenticatedException {
 
     assertProgramStatus(programClient, programId, programStatus, 180);
   }

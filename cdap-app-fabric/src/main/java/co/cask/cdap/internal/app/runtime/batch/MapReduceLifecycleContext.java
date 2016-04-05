@@ -16,9 +16,11 @@ package co.cask.cdap.internal.app.runtime.batch;
  * the License.
  */
 
+import co.cask.cdap.api.Admin;
 import co.cask.cdap.api.Resources;
 import co.cask.cdap.api.app.ApplicationSpecification;
 import co.cask.cdap.api.data.DatasetInstantiationException;
+import co.cask.cdap.api.data.batch.Input;
 import co.cask.cdap.api.data.batch.InputFormatProvider;
 import co.cask.cdap.api.data.batch.OutputFormatProvider;
 import co.cask.cdap.api.data.batch.Split;
@@ -28,6 +30,7 @@ import co.cask.cdap.api.mapreduce.MapReduceContext;
 import co.cask.cdap.api.mapreduce.MapReduceSpecification;
 import co.cask.cdap.api.mapreduce.MapReduceTaskContext;
 import co.cask.cdap.api.plugin.PluginProperties;
+import co.cask.cdap.api.workflow.WorkflowInfo;
 import co.cask.cdap.api.workflow.WorkflowToken;
 import org.apache.twill.api.RunId;
 import org.slf4j.Logger;
@@ -87,6 +90,18 @@ public class MapReduceLifecycleContext<KEY, VALUE> implements MapReduceTaskConte
   @Override
   public WorkflowToken getWorkflowToken() {
     return delegate.getWorkflowToken();
+  }
+
+  @Nullable
+  @Override
+  public WorkflowInfo getWorkflowInfo() {
+    return delegate.getWorkflowInfo();
+  }
+
+  @Nullable
+  @Override
+  public String getInputName() {
+    return delegate.getInputName();
   }
 
   @Override
@@ -202,6 +217,16 @@ public class MapReduceLifecycleContext<KEY, VALUE> implements MapReduceTaskConte
   }
 
   @Override
+  public void addInput(Input input) {
+    LOG.warn(UNSUPPORTED_OPERATION_MESSAGE);
+  }
+
+  @Override
+  public void addInput(Input input, Class<?> mapperCls) {
+    LOG.warn(UNSUPPORTED_OPERATION_MESSAGE);
+  }
+
+  @Override
   public void setOutput(String datasetName) {
     LOG.warn(UNSUPPORTED_OPERATION_MESSAGE);
   }
@@ -254,5 +279,10 @@ public class MapReduceLifecycleContext<KEY, VALUE> implements MapReduceTaskConte
   @Override
   public Map<String, File> getAllLocalFiles() {
     return delegate.getAllLocalFiles();
+  }
+
+  @Override
+  public Admin getAdmin() {
+    return delegate.getAdmin();
   }
 }

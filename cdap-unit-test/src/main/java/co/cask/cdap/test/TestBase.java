@@ -17,6 +17,7 @@
 package co.cask.cdap.test;
 
 import co.cask.cdap.api.Config;
+import co.cask.cdap.api.annotation.Beta;
 import co.cask.cdap.api.app.Application;
 import co.cask.cdap.api.dataset.DatasetAdmin;
 import co.cask.cdap.api.dataset.DatasetProperties;
@@ -25,6 +26,7 @@ import co.cask.cdap.api.metrics.MetricStore;
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.api.plugin.PluginClass;
 import co.cask.cdap.app.guice.AppFabricServiceRuntimeModule;
+import co.cask.cdap.app.guice.AuthorizationModule;
 import co.cask.cdap.app.guice.InMemoryProgramRunnerModule;
 import co.cask.cdap.app.guice.ServiceStoreModules;
 import co.cask.cdap.common.conf.CConfiguration;
@@ -66,6 +68,7 @@ import co.cask.cdap.explore.client.ExploreClient;
 import co.cask.cdap.explore.executor.ExploreExecutorService;
 import co.cask.cdap.explore.guice.ExploreClientModule;
 import co.cask.cdap.explore.guice.ExploreRuntimeModule;
+import co.cask.cdap.gateway.handlers.AuthorizationHandler;
 import co.cask.cdap.internal.app.runtime.schedule.SchedulerService;
 import co.cask.cdap.logging.guice.LoggingModules;
 import co.cask.cdap.metrics.guice.MetricsClientRuntimeModule;
@@ -77,15 +80,27 @@ import co.cask.cdap.proto.Id;
 import co.cask.cdap.proto.NamespaceMeta;
 import co.cask.cdap.proto.artifact.AppRequest;
 import co.cask.cdap.proto.artifact.ArtifactRange;
+import co.cask.cdap.proto.id.InstanceId;
+import co.cask.cdap.proto.id.NamespaceId;
+import co.cask.cdap.proto.id.NamespacedArtifactId;
+import co.cask.cdap.proto.security.Action;
+import co.cask.cdap.proto.security.Principal;
+import co.cask.cdap.security.authorization.AuthorizerInstantiatorService;
+import co.cask.cdap.security.authorization.InvalidAuthorizerException;
+import co.cask.cdap.security.spi.authentication.SecurityRequestContext;
+import co.cask.cdap.security.spi.authorization.Authorizer;
 import co.cask.cdap.store.guice.NamespaceStoreModule;
 import co.cask.cdap.test.internal.ApplicationManagerFactory;
+import co.cask.cdap.test.internal.ArtifactManagerFactory;
 import co.cask.cdap.test.internal.DefaultApplicationManager;
+import co.cask.cdap.test.internal.DefaultArtifactManager;
 import co.cask.cdap.test.internal.DefaultStreamManager;
 import co.cask.cdap.test.internal.LocalStreamWriter;
 import co.cask.cdap.test.internal.StreamManagerFactory;
 import co.cask.tephra.TransactionManager;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closeables;
 import com.google.common.io.Files;
@@ -134,7 +149,10 @@ public class TestBase {
   private static final Logger LOG = LoggerFactory.getLogger(TestBase.class);
 
   @ClassRule
-  public static TemporaryFolder tmpFolder = new TemporaryFolder();
+  public static final TemporaryFolder TMP_FOLDER = new TemporaryFolder();
+  @Deprecated
+  @SuppressWarnings("unused")
+  public static TemporaryFolder tmpFolder = TMP_FOLDER;
 
   private static CConfiguration cConf;
   private static int startCount;
@@ -150,6 +168,7 @@ public class TestBase {
   private static MetricsManager metricsManager;
   private static TestManager testManager;
   private static NamespaceAdmin namespaceAdmin;
+  private static AuthorizerInstantiatorService authorizerInstantiatorService;
 
   // This list is to record ApplicationManager create inside @Test method
   private static final List<ApplicationManager> applicationManagers = new ArrayList<>();
@@ -159,7 +178,7 @@ public class TestBase {
     if (startCount++ > 0) {
       return;
     }
-    File localDataDir = tmpFolder.newFolder();
+    File localDataDir = TMP_FOLDER.newFolder();
 
     cConf = createCConf(localDataDir);
 
@@ -172,7 +191,7 @@ public class TestBase {
 
     // Windows specific requirements
     if (OSDetector.isWindows()) {
-      File tmpDir = tmpFolder.newFolder();
+      File tmpDir = TMP_FOLDER.newFolder();
       File binDir = new File(tmpDir, "bin");
       Assert.assertTrue(binDir.mkdirs());
 
@@ -216,15 +235,19 @@ public class TestBase {
       new NotificationServiceRuntimeModule().getInMemoryModules(),
       new NamespaceClientRuntimeModule().getStandaloneModules(),
       new NamespaceStoreModule().getStandaloneModules(),
+      new AuthorizationModule(),
       new AbstractModule() {
         @Override
         @SuppressWarnings("deprecation")
         protected void configure() {
           install(new FactoryModuleBuilder().implement(ApplicationManager.class, DefaultApplicationManager.class)
                     .build(ApplicationManagerFactory.class));
+          install(new FactoryModuleBuilder().implement(ArtifactManager.class, DefaultArtifactManager.class)
+                    .build(ArtifactManagerFactory.class));
           install(new FactoryModuleBuilder().implement(StreamManager.class, DefaultStreamManager.class)
                     .build(StreamManagerFactory.class));
-          bind(TemporaryFolder.class).toInstance(tmpFolder);
+          bind(TemporaryFolder.class).toInstance(TMP_FOLDER);
+          bind(AuthorizationHandler.class).in(Scopes.SINGLETON);
         }
       }
     );
@@ -249,8 +272,15 @@ public class TestBase {
     streamCoordinatorClient = injector.getInstance(StreamCoordinatorClient.class);
     streamCoordinatorClient.startAndWait();
     testManager = injector.getInstance(UnitTestManager.class);
-    namespaceAdmin = injector.getInstance(NamespaceAdmin.class);
     metricsManager = injector.getInstance(MetricsManager.class);
+    authorizerInstantiatorService = injector.getInstance(AuthorizerInstantiatorService.class);
+    authorizerInstantiatorService.startAndWait();
+    // This is needed so the logged-in user can successfully create the default namespace
+    if (cConf.getBoolean(Constants.Security.Authorization.ENABLED)) {
+      InstanceId instance = new InstanceId(cConf.get(Constants.INSTANCE_NAME));
+      Principal principal = new Principal(SecurityRequestContext.getUserId(), Principal.PrincipalType.USER);
+      authorizerInstantiatorService.get().grant(instance, principal, ImmutableSet.of(Action.ADMIN));
+    }
     namespaceAdmin = injector.getInstance(NamespaceAdmin.class);
     namespaceAdmin.create(NamespaceMeta.DEFAULT);
   }
@@ -314,7 +344,7 @@ public class TestBase {
 
     cConf.set(Constants.CFG_LOCAL_DATA_DIR, localDataDir.getAbsolutePath());
     cConf.setBoolean(Constants.Dangerous.UNRECOVERABLE_RESET, true);
-    cConf.set(Constants.Explore.LOCAL_DATA_DIR, tmpFolder.newFolder("hive").getAbsolutePath());
+    cConf.set(Constants.Explore.LOCAL_DATA_DIR, TMP_FOLDER.newFolder("hive").getAbsolutePath());
     return cConf;
   }
 
@@ -351,6 +381,7 @@ public class TestBase {
     }
 
     namespaceAdmin.delete(Id.Namespace.DEFAULT);
+    authorizerInstantiatorService.stopAndWait();
     streamCoordinatorClient.stopAndWait();
     metricsQueryService.stopAndWait();
     metricsCollectionService.startAndWait();
@@ -374,8 +405,9 @@ public class TestBase {
    * Creates a Namespace.
    *
    * @param namespace the namespace to create
-   * @throws Exception
+   * @deprecated since 3.4.0. Use {@link #getNamespaceAdmin()} to perform namespace operations instead.
    */
+  @Deprecated
   protected static void createNamespace(Id.Namespace namespace) throws Exception {
     getTestManager().createNamespace(new NamespaceMeta.Builder().setName(namespace).build());
   }
@@ -383,9 +415,10 @@ public class TestBase {
   /**
    * Deletes a Namespace.
    *
-   * @param namespace the namespace to create
-   * @throws Exception
+   * @param namespace the namespace to delete
+   * @deprecated since 3.4.0. Use {@link #getNamespaceAdmin()} to perform namespace operations instead.
    */
+  @Deprecated
   protected static void deleteNamespace(Id.Namespace namespace) throws Exception {
     getTestManager().deleteNamespace(namespace);
   }
@@ -446,10 +479,22 @@ public class TestBase {
    *
    * @param artifactId the id of the artifact to add
    * @param artifactFile the contents of the artifact. Must be a valid jar file containing apps or plugins
+   * @deprecated since 3.4.0. Use {@link #addArtifact(NamespacedArtifactId, File)}
+   */
+  @Deprecated
+  protected static void addArtifact(Id.Artifact artifactId, File artifactFile) throws Exception {
+    addArtifact(artifactId.toEntityId(), artifactFile);
+  }
+
+  /**
+   * Add the specified artifact.
+   *
+   * @param artifactId the id of the artifact to add
+   * @param artifactFile the contents of the artifact. Must be a valid jar file containing apps or plugins
    * @throws Exception
    */
-  protected static void addArtifact(Id.Artifact artifactId, File artifactFile) throws Exception {
-    getTestManager().addArtifact(artifactId, artifactFile);
+  protected static ArtifactManager addArtifact(NamespacedArtifactId artifactId, File artifactFile) throws Exception {
+    return getTestManager().addArtifact(artifactId, artifactFile);
   }
 
   /**
@@ -457,10 +502,22 @@ public class TestBase {
    *
    * @param artifactId the id of the artifact to add
    * @param appClass the application class to build the artifact from
-   * @throws Exception
+   * @deprecated since 3.4.0. Use {@link #addArtifact(NamespacedArtifactId, File)}.
    */
+  @Deprecated
   protected static void addAppArtifact(Id.Artifact artifactId, Class<?> appClass) throws Exception {
     getTestManager().addAppArtifact(artifactId, appClass);
+  }
+
+  /**
+   * Build an application artifact from the specified class and then add it.
+   *
+   * @param artifactId the id of the artifact to add
+   * @param appClass the application class to build the artifact from
+   * @return an {@link ArtifactManager} to manage the added artifact
+   */
+  protected static ArtifactManager addAppArtifact(NamespacedArtifactId artifactId, Class<?> appClass) throws Exception {
+    return getTestManager().addAppArtifact(artifactId, appClass);
   }
 
   /**
@@ -504,11 +561,35 @@ public class TestBase {
    * @param parent the parent artifact it extends
    * @param pluginClass the plugin class to build the jar from
    * @param pluginClasses any additional plugin classes that should be included in the jar
-   * @throws Exception
+   * @deprecated since 3.4.0. Use {@link #addPluginArtifact(NamespacedArtifactId, NamespacedArtifactId, Class, Class[])}
    */
+  @Deprecated
   protected static void addPluginArtifact(Id.Artifact artifactId, Id.Artifact parent,
                                           Class<?> pluginClass, Class<?>... pluginClasses) throws Exception {
     getTestManager().addPluginArtifact(artifactId, parent, pluginClass, pluginClasses);
+  }
+
+  /**
+   * Build an artifact from the specified plugin classes and then add it. The
+   * jar created will include all classes in the same package as the give classes, plus any dependencies of the
+   * given classes. If another plugin in the same package as the given plugin requires a different set of dependent
+   * classes, you must include both plugins. For example, suppose you have two plugins,
+   * com.company.myapp.functions.functionX and com.company.myapp.function.functionY, with functionX having
+   * one set of dependencies and functionY having another set of dependencies. If you only add functionX, functionY
+   * will also be included in the created jar since it is in the same package. However, only functionX's dependencies
+   * will be traced and added to the jar, so you will run into issues when the platform tries to register functionY.
+   * In this scenario, you must be certain to include specify both functionX and functionY when calling this method.
+   *
+   * @param artifactId the id of the artifact to add
+   * @param parent the parent artifact it extends
+   * @param pluginClass the plugin class to build the jar from
+   * @param pluginClasses any additional plugin classes that should be included in the jar
+   * @return {@link ArtifactManager} to manage the added plugin artifact
+   */
+  protected static ArtifactManager addPluginArtifact(NamespacedArtifactId artifactId, NamespacedArtifactId parent,
+                                                     Class<?> pluginClass,
+                                                     Class<?>... pluginClasses) throws Exception {
+    return getTestManager().addPluginArtifact(artifactId, parent, pluginClass, pluginClasses);
   }
 
   /**
@@ -528,8 +609,10 @@ public class TestBase {
    *                          by inspecting the jar. This is true for 3rd party plugins, such as jdbc drivers
    * @param pluginClass the plugin class to build the jar from
    * @param pluginClasses any additional plugin classes that should be included in the jar
-   * @throws Exception
+   * @deprecated since 3.4.0. Use
+   * {@link #addPluginArtifact(NamespacedArtifactId, NamespacedArtifactId, Set, Class, Class[])}
    */
+  @Deprecated
   protected static void addPluginArtifact(Id.Artifact artifactId, Id.Artifact parent,
                                           Set<PluginClass> additionalPlugins,
                                           Class<?> pluginClass, Class<?>... pluginClasses) throws Exception {
@@ -548,14 +631,63 @@ public class TestBase {
    * In this scenario, you must be certain to include specify both functionX and functionY when calling this method.
    *
    * @param artifactId the id of the artifact to add
+   * @param parent the parent artifact it extends
+   * @param additionalPlugins any plugin classes that need to be explicitly declared because they cannot be found
+   *                          by inspecting the jar. This is true for 3rd party plugins, such as jdbc drivers
+   * @param pluginClass the plugin class to build the jar from
+   * @param pluginClasses any additional plugin classes that should be included in the jar
+   * @return an {@link ArtifactManager} to manage the added plugin artifact
+   */
+  protected static ArtifactManager addPluginArtifact(NamespacedArtifactId artifactId, NamespacedArtifactId parent,
+                                                     Set<PluginClass> additionalPlugins,
+                                                     Class<?> pluginClass, Class<?>... pluginClasses) throws Exception {
+    return getTestManager().addPluginArtifact(artifactId, parent, additionalPlugins, pluginClass, pluginClasses);
+  }
+
+  /**
+   * Build an artifact from the specified plugin classes and then add it. The
+   * jar created will include all classes in the same package as the give classes, plus any dependencies of the
+   * given classes. If another plugin in the same package as the given plugin requires a different set of dependent
+   * classes, you must include both plugins. For example, suppose you have two plugins,
+   * com.company.myapp.functions.functionX and com.company.myapp.function.functionY, with functionX having
+   * one set of dependencies and functionY having another set of dependencies. If you only add functionX, functionY
+   * will also be included in the created jar since it is in the same package. However, only functionX's dependencies
+   * will be traced and added to the jar, so you will run into issues when the platform tries to register functionY.
+   * In this scenario, you must be certain to include specify both functionX and functionY when calling this method.
+   *
+   * @param artifactId the id of the artifact to add
    * @param parentArtifacts the parent artifacts it extends
    * @param pluginClass the plugin class to build the jar from
    * @param pluginClasses any additional plugin classes that should be included in the jar
-   * @throws Exception
+   * @deprecated since 3.4.0. Use {@link #addPluginArtifact(NamespacedArtifactId, Set, Class, Class[])}
    */
+  @Deprecated
   protected static void addPluginArtifact(Id.Artifact artifactId, Set<ArtifactRange> parentArtifacts,
                                           Class<?> pluginClass, Class<?>... pluginClasses) throws Exception {
     getTestManager().addPluginArtifact(artifactId, parentArtifacts, pluginClass, pluginClasses);
+  }
+
+  /**
+   * Build an artifact from the specified plugin classes and then add it. The
+   * jar created will include all classes in the same package as the give classes, plus any dependencies of the
+   * given classes. If another plugin in the same package as the given plugin requires a different set of dependent
+   * classes, you must include both plugins. For example, suppose you have two plugins,
+   * com.company.myapp.functions.functionX and com.company.myapp.function.functionY, with functionX having
+   * one set of dependencies and functionY having another set of dependencies. If you only add functionX, functionY
+   * will also be included in the created jar since it is in the same package. However, only functionX's dependencies
+   * will be traced and added to the jar, so you will run into issues when the platform tries to register functionY.
+   * In this scenario, you must be certain to include specify both functionX and functionY when calling this method.
+   *
+   * @param artifactId the id of the artifact to add
+   * @param parentArtifacts the parent artifacts it extends
+   * @param pluginClass the plugin class to build the jar from
+   * @param pluginClasses any additional plugin classes that should be included in the jar
+   * @return an {@link ArtifactManager} to manage the added plugin artifact
+   */
+  protected static ArtifactManager addPluginArtifact(NamespacedArtifactId artifactId,
+                                                     Set<ArtifactRange> parentArtifacts, Class<?> pluginClass,
+                                                     Class<?>... pluginClasses) throws Exception {
+    return getTestManager().addPluginArtifact(artifactId, parentArtifacts, pluginClass, pluginClasses);
   }
 
   /**
@@ -583,7 +715,6 @@ public class TestBase {
     getTestManager().deployDatasetModule(namespace, moduleName, datasetModule);
   }
 
-
   /**
    * Deploys {@link DatasetModule}.
    *
@@ -595,6 +726,7 @@ public class TestBase {
                                             Class<? extends DatasetModule> datasetModule) throws Exception {
     deployDatasetModule(Id.Namespace.DEFAULT, moduleName, datasetModule);
   }
+
 
   /**
    * Adds an instance of a dataset.
@@ -610,7 +742,6 @@ public class TestBase {
     return getTestManager().addDatasetInstance(namespace, datasetTypeName, datasetInstanceName, props);
   }
 
-
   /**
    * Adds an instance of a dataset.
    *
@@ -624,6 +755,7 @@ public class TestBase {
                                                                  DatasetProperties props) throws Exception {
     return addDatasetInstance(Id.Namespace.DEFAULT, datasetTypeName, datasetInstanceName, props);
   }
+
 
   /**
    * Adds an instance of dataset.
@@ -712,5 +844,36 @@ public class TestBase {
 
   protected TransactionManager getTxService() {
     return txService;
+  }
+
+  /**
+   * Returns a {@link NamespaceAdmin} to interact with namespaces.
+   */
+  protected static NamespaceAdmin getNamespaceAdmin() {
+    return namespaceAdmin;
+  }
+
+  /**
+   * Returns an {@link Authorizer} for performing authorization operations.
+   */
+  @Beta
+  protected static Authorizer getAuthorizer() throws IOException, InvalidAuthorizerException {
+    return authorizerInstantiatorService.get();
+  }
+
+  /**
+   * Returns the {@link CConfiguration} used in tests.
+   */
+  protected static CConfiguration getConfiguration() {
+    return cConf;
+  }
+
+  /**
+   * Deletes all applications in the specified namespace.
+   *
+   * @param namespaceId the namespace from which to delete all applications
+   */
+  protected static void deleteAllApplications(NamespaceId namespaceId) throws Exception {
+    getTestManager().deleteAllApplications(namespaceId);
   }
 }

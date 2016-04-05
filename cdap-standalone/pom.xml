@@ -144,9 +144,33 @@
       <artifactId>twill-discovery-core</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.apache.twill</groupId>
+      <artifactId>twill-zookeeper</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.twill</groupId>
+      <artifactId>twill-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.zookeeper</groupId>
+      <artifactId>zookeeper</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.xerial.snappy</groupId>
+      <artifactId>snappy-java</artifactId>
+    </dependency>
+    <dependency>
       <groupId>co.cask.cdap</groupId>
       <artifactId>cdap-ui</artifactId>
       <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>co.cask.cdap</groupId>
+      <artifactId>cdap-app-fabric</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>junit</groupId>
@@ -213,7 +237,7 @@
                   <overWriteReleases>false</overWriteReleases>
                   <overWriteSnapshots>false</overWriteSnapshots>
                   <overWriteIfNewer>true</overWriteIfNewer>
-                  <excludeGroupIds>org.apache.hbase,asm,org.apache.zookeeper</excludeGroupIds>
+                  <excludeGroupIds>org.apache.hbase,asm</excludeGroupIds>
                   <excludeArtifactIds>zkclient,servlet-api,cdap-cli,cdap-explore-jdbc</excludeArtifactIds>
                   <prependGroupId>true</prependGroupId>
                   <silent>true</silent>
@@ -401,6 +425,14 @@
                         <include>cdap-etl-realtime-${project.version}.jar</include>
                       </includes>
                     </resource>
+                    <resource>
+                      <directory>
+                        ${project.parent.basedir}/cdap-app-templates/cdap-etl/cdap-etl-data-pipeline/target
+                      </directory>
+                      <includes>
+                        <include>cdap-etl-data-pipeline-${project.version}.jar</include>
+                      </includes>
+                    </resource>
                   </resources>
                 </configuration>
               </execution>
@@ -500,6 +532,8 @@
                         <include name="${additional.artifacts.jar.pattern}"/>
                         <include name="${additional.artifacts.config.pattern}"/>
                         <exclude name="${additional.artifacts.exclude.pattern}"/>
+                        <exclude name="*:sources"/>
+                        <exclude name="*:javadoc"/>
                       </fileset>
                     </copy>
                   </target>

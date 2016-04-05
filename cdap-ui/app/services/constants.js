@@ -19,25 +19,37 @@ angular.module(PKG.name + '.services')
     // Should be under property called 'artifactTypes' to be consistent. GLOBALS.etlBatch doesn't make much sense.
     etlBatch: 'cdap-etl-batch',
     etlRealtime: 'cdap-etl-realtime',
-
+    etlDataPipeline: 'cdap-etl-data-pipeline',
+    etlBatchPipelines: ['cdap-etl-batch', 'cdap-etl-data-pipeline'],
     pluginTypes: {
       'cdap-etl-batch': {
         'source': 'batchsource',
         'sink': 'batchsink',
-        'transform': 'transform'
+        'transform': 'transform',
       },
       'cdap-etl-realtime': {
         'source': 'realtimesource',
         'sink': 'realtimesink',
         'transform': 'transform'
+      },
+      'cdap-etl-data-pipeline': {
+        'source': 'batchsource',
+        'sink': 'batchsink',
+        'transform': 'transform',
+        'batchaggregator': 'batchaggregator',
+        'sparksink': 'sparksink',
+        'sparkcompute': 'sparkcompute'
       }
     },
     pluginConvert: {
+      'batchaggregator': 'batchaggregator',
       'batchsource': 'source',
       'realtimesource': 'source',
       'batchsink': 'sink',
       'realtimesink': 'sink',
-      'transform': 'transform'
+      'transform': 'transform',
+      'sparksink': 'sink',
+      'sparkcompute': 'transform'
     },
 
     'en': {
@@ -53,7 +65,7 @@ angular.module(PKG.name + '.services')
             'SYNTAX-CONFIG-JSON': 'Error parsing widgets JSON for the plugin. Please check the documentation to fix.',
             'SEMANTIC-CONFIG-JSON': 'Semantic error in the configuration JSON for the plugin.',
             'GENERIC-MISSING-REQUIRED-FIELDS': 'Please provide required information.',
-            'MISSING-REQUIRED-FIELDS': ' is missing required fields',
+            'MISSING-REQUIRED-FIELDS': 'is missing required fields',
             'MORE-THAN-ONE-SOURCE-FOUND': 'Pipelines can only have one source. Please remove any additional sources.',
             'NO-SOURCE-FOUND': 'Please add a source to your pipeline',
             'MISSING-NAME': 'Pipeline name is missing.',
@@ -85,7 +97,11 @@ angular.module(PKG.name + '.services')
       admin: {
         templateNameExistsError: 'This template name already exists! Please choose another name.',
         pluginSameNameError: 'There is already a plugin with this name.',
-        templateNameMissingError: 'Please enter a template name.'
+        templateNameMissingError: 'Please enter a template name.',
+        pluginTypeMissingError: 'Please choose a plugin type.',
+        templateTypeMissingError: 'Please choose a template type.',
+        pluginMissingError: 'Please choose a plugin.',
+        pluginVersionMissingError: 'Please choose artifact version for the plugin.'
       }
     }
   });

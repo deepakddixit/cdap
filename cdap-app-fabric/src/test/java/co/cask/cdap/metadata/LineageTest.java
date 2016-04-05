@@ -33,6 +33,7 @@ import co.cask.cdap.proto.ProgramType;
 import co.cask.cdap.proto.RunRecord;
 import co.cask.cdap.proto.metadata.MetadataRecord;
 import co.cask.cdap.proto.metadata.MetadataScope;
+import co.cask.cdap.proto.metadata.lineage.CollapseType;
 import co.cask.cdap.proto.metadata.lineage.LineageRecord;
 import co.cask.cdap.test.SlowTests;
 import com.google.common.base.Predicate;
@@ -129,7 +130,8 @@ public class LineageTest extends MetadataTestBase {
             new Relation(stream, flow, AccessType.READ,
                          flowRunId,
                          ImmutableSet.of(Id.Flow.Flowlet.from(flow, AllProgramsApp.A.NAME)))
-          )));
+          )),
+          Collections.<CollapseType>emptySet());
       Assert.assertEquals(expected, lineage);
 
       // Fetch dataset lineage with time strings
@@ -162,7 +164,8 @@ public class LineageTest extends MetadataTestBase {
       lineage = fetchLineage(stream, laterStartTime, laterEndTime, 10);
 
       Assert.assertEquals(
-        LineageSerializer.toLineageRecord(laterStartTime, laterEndTime, new Lineage(ImmutableSet.<Relation>of())),
+        LineageSerializer.toLineageRecord(laterStartTime, laterEndTime, new Lineage(ImmutableSet.<Relation>of()),
+                                          Collections.<CollapseType>emptySet()),
         lineage);
 
       // Assert with a time range before the flow run should return no results
@@ -172,7 +175,8 @@ public class LineageTest extends MetadataTestBase {
       lineage = fetchLineage(stream, earlierStartTime, earlierEndTime, 10);
 
       Assert.assertEquals(
-        LineageSerializer.toLineageRecord(earlierStartTime, earlierEndTime, new Lineage(ImmutableSet.<Relation>of())),
+        LineageSerializer.toLineageRecord(earlierStartTime, earlierEndTime, new Lineage(ImmutableSet.<Relation>of()),
+                                          Collections.<CollapseType>emptySet()),
         lineage);
 
       // Test bad time ranges
@@ -196,11 +200,14 @@ public class LineageTest extends MetadataTestBase {
     Id.Application app = Id.Application.from(namespace, AllProgramsApp.NAME);
     Id.Flow flow = Id.Flow.from(app, AllProgramsApp.NoOpFlow.NAME);
     Id.Program mapreduce = Id.Program.from(app, ProgramType.MAPREDUCE, AllProgramsApp.NoOpMR.NAME);
+    Id.Program mapreduce2 = Id.Program.from(app, ProgramType.MAPREDUCE, AllProgramsApp.NoOpMR2.NAME);
     Id.Program spark = Id.Program.from(app, ProgramType.SPARK, AllProgramsApp.NoOpSpark.NAME);
     Id.Program service = Id.Program.from(app, ProgramType.SERVICE, AllProgramsApp.NoOpService.NAME);
     Id.Program worker = Id.Program.from(app, ProgramType.WORKER, AllProgramsApp.NoOpWorker.NAME);
     Id.Program workflow = Id.Program.from(app, ProgramType.WORKFLOW, AllProgramsApp.NoOpWorkflow.NAME);
     Id.DatasetInstance dataset = Id.DatasetInstance.from(namespace, AllProgramsApp.DATASET_NAME);
+    Id.DatasetInstance dataset2 = Id.DatasetInstance.from(namespace, AllProgramsApp.DATASET_NAME2);
+    Id.DatasetInstance dataset3 = Id.DatasetInstance.from(namespace, AllProgramsApp.DATASET_NAME3);
     Id.Stream stream = Id.Stream.from(namespace, AllProgramsApp.STREAM_NAME);
 
     Assert.assertEquals(200, status(createNamespace(namespace)));
@@ -224,6 +231,7 @@ public class LineageTest extends MetadataTestBase {
       // Start all programs
       RunId flowRunId = runAndWait(flow);
       RunId mrRunId = runAndWait(mapreduce);
+      RunId mrRunId2 = runAndWait(mapreduce2);
       RunId sparkRunId = runAndWait(spark);
       runAndWait(workflow);
       RunId workflowMrRunId = getRunId(mapreduce, mrRunId);
@@ -235,6 +243,7 @@ public class LineageTest extends MetadataTestBase {
       // Wait for programs to finish
       waitForStop(flow, true);
       waitForStop(mapreduce, false);
+      waitForStop(mapreduce2, false);
       waitForStop(spark, false);
       waitForStop(workflow, false);
       waitForStop(worker, false);
@@ -244,7 +253,7 @@ public class LineageTest extends MetadataTestBase {
       long oneHour = TimeUnit.HOURS.toSeconds(1);
 
       // Fetch dataset lineage
-      LineageRecord lineage = fetchLineage(dataset, now - oneHour, now + oneHour, 10);
+      LineageRecord lineage = fetchLineage(dataset, now - oneHour, now + oneHour, toSet(CollapseType.ACCESS), 10);
 
       // dataset is accessed by all programs
       LineageRecord expected =
@@ -254,10 +263,15 @@ public class LineageTest extends MetadataTestBase {
           new Lineage(ImmutableSet.of(
             // Dataset access
             new Relation(dataset, flow, AccessType.UNKNOWN, flowRunId,
-                         ImmutableSet.of(Id.Flow.Flowlet.from(flow, AllProgramsApp.A.NAME))),
-            new Relation(dataset, mapreduce, AccessType.UNKNOWN, mrRunId),
-            new Relation(dataset, spark, AccessType.UNKNOWN, sparkRunId),
-            new Relation(dataset, mapreduce, AccessType.UNKNOWN, workflowMrRunId),
+                         toSet(Id.Flow.Flowlet.from(flow, AllProgramsApp.A.NAME))),
+            new Relation(dataset, mapreduce, AccessType.WRITE, mrRunId),
+            new Relation(dataset, mapreduce2, AccessType.WRITE, mrRunId2),
+            new Relation(dataset2, mapreduce2, AccessType.READ, mrRunId2),
+            new Relation(dataset, spark, AccessType.READ, sparkRunId),
+            new Relation(dataset2, spark, AccessType.WRITE, sparkRunId),
+            new Relation(dataset3, spark, AccessType.READ, sparkRunId),
+            new Relation(dataset3, spark, AccessType.WRITE, sparkRunId),
+            new Relation(dataset, mapreduce, AccessType.WRITE, workflowMrRunId),
             new Relation(dataset, service, AccessType.UNKNOWN, serviceRunId),
             new Relation(dataset, worker, AccessType.UNKNOWN, workerRunId),
 
@@ -268,11 +282,12 @@ public class LineageTest extends MetadataTestBase {
             new Relation(stream, spark, AccessType.READ, sparkRunId),
             new Relation(stream, mapreduce, AccessType.READ, workflowMrRunId),
             new Relation(stream, worker, AccessType.WRITE, workerRunId)
-          )));
+          )),
+          toSet(CollapseType.ACCESS));
       Assert.assertEquals(expected, lineage);
 
       // Fetch stream lineage
-      lineage = fetchLineage(stream, now - oneHour, now + oneHour, 10);
+      lineage = fetchLineage(stream, now - oneHour, now + oneHour, toSet(CollapseType.ACCESS), 10);
 
       // stream too is accessed by all programs
       Assert.assertEquals(expected, lineage);
@@ -299,6 +314,8 @@ public class LineageTest extends MetadataTestBase {
       Assert.assertEquals(toSet(new MetadataRecord(app, MetadataScope.USER, emptyMap(), emptySet()),
                                 new MetadataRecord(programForSpark, MetadataScope.USER, emptyMap(), sparkTags),
                                 new MetadataRecord(dataset, MetadataScope.USER, datasetProperties, emptySet()),
+                                new MetadataRecord(dataset2, MetadataScope.USER, emptyMap(), emptySet()),
+                                new MetadataRecord(dataset3, MetadataScope.USER, emptyMap(), emptySet()),
                                 new MetadataRecord(stream, MetadataScope.USER, emptyMap(), emptySet())),
                           fetchRunMetadata(new Id.Run(spark, sparkRunId.getId())));
     } finally {

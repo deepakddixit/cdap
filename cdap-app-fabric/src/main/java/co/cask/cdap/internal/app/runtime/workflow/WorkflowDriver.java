@@ -1,5 +1,5 @@
 /*
- * Copyright © 2014-2015 Cask Data, Inc.
+ * Copyright © 2014-2016 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -16,10 +16,16 @@
 package co.cask.cdap.internal.app.runtime.workflow;
 
 import co.cask.cdap.api.Predicate;
+import co.cask.cdap.api.ProgramLifecycle;
 import co.cask.cdap.api.app.ApplicationSpecification;
+import co.cask.cdap.api.common.RuntimeArguments;
+import co.cask.cdap.api.common.Scope;
+import co.cask.cdap.api.dataset.DatasetManagementException;
 import co.cask.cdap.api.metrics.MetricsCollectionService;
 import co.cask.cdap.api.schedule.SchedulableProgramType;
+import co.cask.cdap.api.workflow.NodeStatus;
 import co.cask.cdap.api.workflow.ScheduleProgramInfo;
+import co.cask.cdap.api.workflow.Workflow;
 import co.cask.cdap.api.workflow.WorkflowAction;
 import co.cask.cdap.api.workflow.WorkflowActionNode;
 import co.cask.cdap.api.workflow.WorkflowActionSpecification;
@@ -27,6 +33,7 @@ import co.cask.cdap.api.workflow.WorkflowConditionNode;
 import co.cask.cdap.api.workflow.WorkflowContext;
 import co.cask.cdap.api.workflow.WorkflowForkNode;
 import co.cask.cdap.api.workflow.WorkflowNode;
+import co.cask.cdap.api.workflow.WorkflowNodeState;
 import co.cask.cdap.api.workflow.WorkflowNodeType;
 import co.cask.cdap.api.workflow.WorkflowSpecification;
 import co.cask.cdap.api.workflow.WorkflowToken;
@@ -38,22 +45,21 @@ import co.cask.cdap.app.store.Store;
 import co.cask.cdap.common.app.RunIds;
 import co.cask.cdap.common.conf.CConfiguration;
 import co.cask.cdap.common.conf.Constants;
-import co.cask.cdap.common.lang.ClassLoaders;
-import co.cask.cdap.common.lang.CombineClassLoader;
 import co.cask.cdap.common.lang.InstantiatorFactory;
-import co.cask.cdap.common.lang.PropertyFieldSetter;
 import co.cask.cdap.common.logging.LoggingContext;
 import co.cask.cdap.common.logging.LoggingContextAccessor;
 import co.cask.cdap.data2.dataset2.DatasetFramework;
 import co.cask.cdap.internal.app.runtime.BasicArguments;
-import co.cask.cdap.internal.app.runtime.DataSetFieldSetter;
-import co.cask.cdap.internal.app.runtime.MetricsFieldSetter;
 import co.cask.cdap.internal.app.runtime.ProgramOptionConstants;
 import co.cask.cdap.internal.app.workflow.DefaultWorkflowActionConfigurer;
-import co.cask.cdap.internal.lang.Reflections;
+import co.cask.cdap.internal.dataset.DatasetCreationSpec;
 import co.cask.cdap.internal.workflow.ProgramWorkflowAction;
 import co.cask.cdap.logging.context.WorkflowLoggingContext;
-import co.cask.cdap.proto.Id;
+import co.cask.cdap.proto.ProgramType;
+import co.cask.cdap.proto.WorkflowNodeStateDetail;
+import co.cask.cdap.proto.WorkflowNodeThrowable;
+import co.cask.cdap.proto.id.DatasetId;
+import co.cask.cdap.proto.id.ProgramRunId;
 import co.cask.http.NettyHttpService;
 import co.cask.tephra.TransactionContext;
 import co.cask.tephra.TransactionFailureException;
@@ -68,11 +74,11 @@ import com.google.common.collect.Maps;
 import com.google.common.reflect.TypeToken;
 import com.google.common.util.concurrent.AbstractExecutionThreadService;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import org.apache.twill.api.RunId;
 import org.apache.twill.discovery.DiscoveryServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Iterator;
@@ -105,7 +111,6 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
   private final InetAddress hostname;
   private final Map<String, String> runtimeArgs;
   private final WorkflowSpecification workflowSpec;
-  private final long logicalStartTime;
   private final ProgramWorkflowRunnerFactory workflowProgramRunnerFactory;
   private final Map<String, WorkflowActionNode> status = new ConcurrentHashMap<>();
   private final LoggingContext loggingContext;
@@ -114,43 +119,50 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
   private boolean suspended;
   private Lock lock;
   private Condition condition;
-  private final RunId runId;
   private final MetricsCollectionService metricsCollectionService;
-  private final DatasetFramework datasetFramework;
+  private final NameMappedDatasetFramework datasetFramework;
   private final DiscoveryServiceClient discoveryServiceClient;
   private final TransactionSystemClient txClient;
   private final Store store;
-  private final Id.Workflow workflowId;
+  private final ProgramRunId workflowRunId;
+  private Workflow workflow;
+  private final BasicWorkflowContext basicWorkflowContext;
+  private final Map<String, WorkflowNodeState> nodeStates = new ConcurrentHashMap<>();
+
   private final CConfiguration cConf;
 
   WorkflowDriver(Program program, ProgramOptions options, InetAddress hostname,
                  WorkflowSpecification workflowSpec, ProgramRunnerFactory programRunnerFactory,
-                 MetricsCollectionService metricsCollectionService, DatasetFramework datasetFramework,
-                 DiscoveryServiceClient discoveryServiceClient, TransactionSystemClient txClient,
-                 Store store, CConfiguration cConf) {
+                 MetricsCollectionService metricsCollectionService,
+                 DatasetFramework datasetFramework, DiscoveryServiceClient discoveryServiceClient,
+                 TransactionSystemClient txClient, Store store, CConfiguration cConf) {
     this.program = program;
     this.hostname = hostname;
     this.runtimeArgs = createRuntimeArgs(options.getUserArguments());
     this.workflowSpec = workflowSpec;
-    Arguments arguments = options.getArguments();
-    this.logicalStartTime = arguments.hasOption(ProgramOptionConstants.LOGICAL_START_TIME)
-      ? Long.parseLong(arguments.getOption(ProgramOptionConstants.LOGICAL_START_TIME))
-      : System.currentTimeMillis();
-    this.workflowProgramRunnerFactory = new ProgramWorkflowRunnerFactory(workflowSpec, programRunnerFactory, program,
-                                                                         options);
     this.lock = new ReentrantLock();
     this.condition = lock.newCondition();
+    String runId = options.getArguments().getOption(ProgramOptionConstants.RUN_ID);
+    this.workflowRunId = new ProgramRunId(program.getNamespaceId(), program.getApplicationId(), ProgramType.WORKFLOW,
+                                          program.getName(), runId);
     this.loggingContext = new WorkflowLoggingContext(program.getNamespaceId(), program.getApplicationId(),
-                                                     program.getName(),
-                                                     arguments.getOption(ProgramOptionConstants.RUN_ID));
-    this.runId = RunIds.fromString(options.getArguments().getOption(ProgramOptionConstants.RUN_ID));
+                                                     program.getName(), workflowRunId.getRun());
+
     this.metricsCollectionService = metricsCollectionService;
-    this.datasetFramework = datasetFramework;
+    this.datasetFramework = new NameMappedDatasetFramework(datasetFramework,
+                                                           workflowSpec.getLocalDatasetSpecs().keySet(),
+                                                           workflowRunId.getRun());
     this.discoveryServiceClient = discoveryServiceClient;
     this.txClient = txClient;
     this.store = store;
-    this.workflowId = Id.Workflow.from(program.getId().getApplication(), workflowSpec.getName());
     this.cConf = cConf;
+    this.workflowProgramRunnerFactory = new ProgramWorkflowRunnerFactory(workflowSpec, programRunnerFactory,
+                                                                         program, options);
+
+    this.basicWorkflowContext = new BasicWorkflowContext(workflowSpec, null, null, new BasicArguments(runtimeArgs),
+                                                         null, program, RunIds.fromString(runId),
+                                                         metricsCollectionService, datasetFramework, txClient,
+                                                         discoveryServiceClient, nodeStates);
   }
 
   @Override
@@ -168,6 +180,33 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
 
     httpService.startAndWait();
     runningThread = Thread.currentThread();
+    createLocalDatasets();
+    workflow = initializeWorkflow();
+  }
+
+  @SuppressWarnings("unchecked")
+  private Workflow initializeWorkflow() throws Exception {
+    Class<?> clz = Class.forName(workflowSpec.getClassName(), true, program.getClassLoader());
+    if (!Workflow.class.isAssignableFrom(clz)) {
+      throw new IllegalStateException(String.format("%s is not Workflow.", clz));
+    }
+
+    Class<? extends Workflow> workflowClass = (Class<? extends Workflow>) clz;
+    Workflow workflow = new InstantiatorFactory(false).get(TypeToken.of(workflowClass)).create();
+
+    TransactionContext transactionContext = basicWorkflowContext.getDatasetCache().newTransactionContext();
+    transactionContext.start();
+
+    try {
+      if (workflow instanceof ProgramLifecycle) {
+        ((ProgramLifecycle<WorkflowContext>) workflow).initialize(basicWorkflowContext);
+      }
+    } catch (Throwable t) {
+      LOG.error(String.format("Failed to initialize the Workflow %s", workflowRunId), t);
+      transactionContext.abort(new TransactionFailureException("Transaction function failure for transaction. ", t));
+    }
+    transactionContext.finish();
+    return workflow;
   }
 
   private void blockIfSuspended() {
@@ -216,19 +255,37 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
   @Override
   protected void shutDown() throws Exception {
     httpService.stopAndWait();
+    deleteLocalDatasets();
+    destroyWorkflow();
   }
 
-  private void executeAction(WorkflowActionNode node,
-                             InstantiatorFactory instantiator, final ClassLoader classLoader,
-                             WorkflowToken token) throws Exception {
+  @SuppressWarnings("unchecked")
+  private void destroyWorkflow() {
+    TransactionContext transactionContext = basicWorkflowContext.getDatasetCache().newTransactionContext();
+    try {
+      transactionContext.start();
+      if (workflow instanceof ProgramLifecycle) {
+        ((ProgramLifecycle<WorkflowContext>) workflow).destroy();
+      }
+      transactionContext.finish();
+    } catch (Throwable t) {
+      LOG.error(String.format("Failed to destroy the Workflow %s", workflowRunId), t);
+      try {
+        transactionContext.abort();
+      } catch (Throwable e) {
+        LOG.error("Failed to abort the transaction.", e);
+      }
+    }
+  }
 
-    final SchedulableProgramType programType = node.getProgram().getProgramType();
-    final WorkflowActionSpecification actionSpec = getActionSpecification(node, programType);
-
+  private void executeAction(WorkflowActionNode node, WorkflowToken token) throws Exception {
+    WorkflowActionSpecification actionSpec = getActionSpecification(node, node.getProgram().getProgramType());
     status.put(node.getNodeId(), node);
 
-    final BasicWorkflowContext workflowContext = createWorkflowContext(actionSpec, token, node.getNodeId());
-    final WorkflowAction action = initialize(actionSpec, classLoader, instantiator, workflowContext);
+    BasicWorkflowContext workflowContext = createWorkflowContext(actionSpec, token, node.getNodeId());
+    final WorkflowAction action = new ProgramWorkflowAction(node.getProgram().getProgramName(),
+                                                            node.getProgram().getProgramType());
+    action.initialize(workflowContext);
 
     CountDownLatch executorTerminateLatch = new CountDownLatch(1);
     ExecutorService executorService = createExecutor(1, executorTerminateLatch, "action-" + node.getNodeId() + "-%d");
@@ -238,22 +295,13 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
       Future<?> future = executorService.submit(new Callable<Void>() {
         @Override
         public Void call() throws Exception {
-          setContextCombinedClassLoader(action);
-          try {
-            if (programType == SchedulableProgramType.CUSTOM_ACTION) {
-              runInTransaction(action, workflowContext);
-            } else {
-              action.run();
-            }
-            return null;
-          } finally {
-            destroyInTransaction(action, actionSpec, workflowContext);
-          }
+          action.run();
+          return null;
         }
       });
       future.get();
     } catch (Throwable t) {
-      LOG.error("Exception on WorkflowAction.run(), aborting Workflow. {}", actionSpec, t);
+      LOG.error("Error executing the action {} in the Workflow {}.", actionSpec.getName(), workflowRunId, t);
       Throwables.propagateIfPossible(t, Exception.class);
       throw Throwables.propagate(t);
     } finally {
@@ -261,7 +309,7 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
       executorTerminateLatch.await();
       status.remove(node.getNodeId());
     }
-    store.updateWorkflowToken(workflowId, runId.getId(), token);
+    store.updateWorkflowToken(workflowRunId, token);
   }
 
   private WorkflowActionSpecification getActionSpecification(WorkflowActionNode node,
@@ -283,49 +331,6 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
         throw new IllegalStateException("Workflow stopped without executing all tasks");
     }
     return actionSpec;
-  }
-
-  private void runInTransaction(WorkflowAction action,
-                                BasicWorkflowContext workflowContext) throws TransactionFailureException {
-    TransactionContext transactionContext = workflowContext.getDatasetCache().newTransactionContext();
-    transactionContext.start();
-    try {
-      action.run();
-    } catch (Throwable e) {
-      LOG.error("Transaction failed to run: " + e.getMessage());
-      transactionContext.abort(new TransactionFailureException("Transaction function failure for transaction. ", e));
-    }
-    transactionContext.finish();
-  }
-
-  private void destroyInTransaction(WorkflowAction action, WorkflowActionSpecification spec,
-                                    BasicWorkflowContext workflowContext) throws TransactionFailureException {
-    TransactionContext transactionContext = workflowContext.getDatasetCache().newTransactionContext();
-    transactionContext.start();
-    try {
-      try {
-        destroy(spec, action);
-      } catch (Throwable e) {
-        LOG.error("Transaction failed to destroy: " + e.getMessage());
-        transactionContext.abort(new TransactionFailureException("Transaction function failure for transaction. ", e));
-      }
-      transactionContext.finish();
-    } finally {
-      // after the action is destroyed, we can release its datasets; TODO: would it be better to hold on to them?
-      workflowContext.getDatasetCache().invalidate();
-    }
-  }
-
-  private void initializeInTransaction(WorkflowAction action, BasicWorkflowContext workflowContext) throws Exception {
-    TransactionContext transactionContext = workflowContext.getDatasetCache().newTransactionContext();
-    transactionContext.start();
-    try {
-      action.initialize(workflowContext);
-    } catch (Throwable e) {
-      LOG.error("Transaction failed to initialize: " + e.getMessage());
-      transactionContext.abort(new TransactionFailureException("Transaction function failure for transaction. ", e));
-    }
-    transactionContext.finish();
   }
 
   private void executeFork(final ApplicationSpecification appSpec, WorkflowForkNode fork,
@@ -356,7 +361,7 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
           Map.Entry<String, WorkflowToken> retValue = forkBranchResult.get();
           String branchInfo = retValue.getKey();
           WorkflowToken branchToken = retValue.getValue();
-          ((BasicWorkflowToken) token).mergeToken((BasicWorkflowToken) branchToken);
+          ((BasicWorkflowToken) token).mergeToken(branchToken);
           LOG.info("Execution of branch {} for fork {} completed", branchInfo, fork);
         } catch (Throwable t) {
           Throwable rootCause = Throwables.getRootCause(t);
@@ -374,10 +379,34 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
       }
     } finally {
       // Update the WorkflowToken after the execution of the FORK node completes.
-      store.updateWorkflowToken(workflowId, runId.getId(), token);
+      store.updateWorkflowToken(workflowRunId, token);
       executorService.shutdownNow();
       // Wait for the executor termination
       executorTerminateLatch.await();
+    }
+  }
+
+  private void executeCustomAction(final WorkflowActionNode node, InstantiatorFactory instantiator,
+                                   final ClassLoader classLoader, WorkflowToken token)  throws Exception {
+    BasicWorkflowContext context = createWorkflowContext(node.getActionSpecification(), token, node.getNodeId());
+    CustomActionExecutor customActionExecutor = new CustomActionExecutor(workflowRunId, context,
+                                                                         instantiator, classLoader);
+    status.put(node.getNodeId(), node);
+    store.addWorkflowNodeState(workflowRunId, new WorkflowNodeStateDetail(node.getNodeId(), NodeStatus.RUNNING));
+    Throwable failureCause = null;
+    try {
+      customActionExecutor.execute();
+    } catch (Throwable t) {
+      failureCause = t;
+      throw t;
+    } finally {
+      status.remove(node.getNodeId());
+      store.updateWorkflowToken(workflowRunId, token);
+      NodeStatus status = failureCause == null ? NodeStatus.COMPLETED : NodeStatus.FAILED;
+      nodeStates.put(node.getNodeId(), new WorkflowNodeState(node.getNodeId(), status, null, failureCause));
+      WorkflowNodeThrowable defaultThrowable = failureCause == null ? null : new WorkflowNodeThrowable(failureCause);
+      store.addWorkflowNodeState(workflowRunId, new WorkflowNodeStateDetail(node.getNodeId(), status, null,
+                                                                            defaultThrowable));
     }
   }
 
@@ -387,7 +416,12 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
     ((BasicWorkflowToken) token).setCurrentNode(node.getNodeId());
     switch (nodeType) {
       case ACTION:
-        executeAction((WorkflowActionNode) node, instantiator, classLoader, token);
+        WorkflowActionNode actionNode = (WorkflowActionNode) node;
+        if (SchedulableProgramType.CUSTOM_ACTION == actionNode.getProgram().getProgramType()) {
+          executeCustomAction(actionNode, instantiator, classLoader, token);
+        } else {
+          executeAction(actionNode, token);
+        }
         break;
       case FORK:
         executeFork(appSpec, (WorkflowForkNode) node, instantiator, classLoader, token);
@@ -408,10 +442,11 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
     Predicate<WorkflowContext> predicate = instantiator.get(
       TypeToken.of((Class<? extends Predicate<WorkflowContext>>) clz)).create();
 
-    WorkflowContext context = new BasicWorkflowContext(workflowSpec, null, logicalStartTime, null,
+    WorkflowContext context = new BasicWorkflowContext(workflowSpec, null, null,
                                                        new BasicArguments(runtimeArgs), token,
-                                                       program, runId, metricsCollectionService,
-                                                       datasetFramework, txClient, discoveryServiceClient);
+                                                       program, RunIds.fromString(workflowRunId.getRun()),
+                                                       metricsCollectionService, datasetFramework, txClient,
+                                                       discoveryServiceClient, nodeStates);
     Iterator<WorkflowNode> iterator;
     if (predicate.apply(context)) {
       // execute the if branch
@@ -423,8 +458,36 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
     // If a workflow updates its token at a condition node, it will be persisted after the execution of the next node.
     // However, the call below ensures that even if the workflow fails/crashes after a condition node, updates from the
     // condition node are also persisted.
-    store.updateWorkflowToken(workflowId, runId.getId(), token);
+    store.updateWorkflowToken(workflowRunId, token);
     executeAll(iterator, appSpec, instantiator, classLoader, token);
+  }
+
+  private void createLocalDatasets() throws IOException, DatasetManagementException {
+    for (Map.Entry<String, String> entry : datasetFramework.getDatasetNameMapping().entrySet()) {
+      String localInstanceName = entry.getValue();
+      DatasetId instanceId = new DatasetId(workflowRunId.getNamespace(), localInstanceName);
+      DatasetCreationSpec instanceSpec = workflowSpec.getLocalDatasetSpecs().get(entry.getKey());
+      LOG.debug("Adding Workflow local dataset instance: {}", localInstanceName);
+      datasetFramework.addInstance(instanceSpec.getTypeName(), instanceId.toId(), instanceSpec.getProperties());
+    }
+  }
+
+  private void deleteLocalDatasets() {
+    for (Map.Entry<String, String> entry : datasetFramework.getDatasetNameMapping().entrySet()) {
+      Map<String, String> datasetArguments = RuntimeArguments.extractScope(Scope.DATASET, entry.getKey(), runtimeArgs);
+      if (Boolean.parseBoolean(datasetArguments.get("keep.local"))) {
+        continue;
+      }
+
+      String localInstanceName = entry.getValue();
+      DatasetId instanceId = new DatasetId(workflowRunId.getNamespace(), localInstanceName);
+      LOG.debug("Deleting Workflow local dataset instance: {}", localInstanceName);
+      try {
+        datasetFramework.deleteInstance(instanceId.toId());
+      } catch (Throwable t) {
+        LOG.warn("Failed to delete the Workflow local dataset instance {}", localInstanceName, t);
+      }
+    }
   }
 
   @Override
@@ -434,6 +497,7 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
     executeAll(workflowSpec.getNodes().iterator(), program.getApplicationSpecification(),
                new InstantiatorFactory(false), program.getClassLoader(), token);
 
+    basicWorkflowContext.setSuccess();
     LOG.info("Workflow execution succeeded for {}", workflowSpec);
   }
 
@@ -474,55 +538,12 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
 
   private BasicWorkflowContext createWorkflowContext(WorkflowActionSpecification actionSpec,
                                                      WorkflowToken token, String nodeId) {
-    return new BasicWorkflowContext(workflowSpec, actionSpec, logicalStartTime,
-                                    workflowProgramRunnerFactory.getProgramWorkflowRunner(actionSpec, token, nodeId),
-                                    new BasicArguments(runtimeArgs), token, program, runId, metricsCollectionService,
-                                    datasetFramework, txClient, discoveryServiceClient);
-  }
-
-  /**
-   * Instantiates and initialize a WorkflowAction.
-   */
-  @SuppressWarnings("unchecked")
-  private WorkflowAction initialize(WorkflowActionSpecification actionSpec,
-                                    ClassLoader classLoader, InstantiatorFactory instantiator,
-                                    BasicWorkflowContext workflowContext) throws Exception {
-    Class<?> clz = Class.forName(actionSpec.getClassName(), true, classLoader);
-    Preconditions.checkArgument(WorkflowAction.class.isAssignableFrom(clz), "%s is not a WorkflowAction.", clz);
-    WorkflowAction action = instantiator.get(TypeToken.of((Class<? extends WorkflowAction>) clz)).create();
-
-    ClassLoader oldClassLoader = setContextCombinedClassLoader(action);
-    try {
-      Reflections.visit(action, action.getClass(),
-                        new PropertyFieldSetter(actionSpec.getProperties()),
-                        new DataSetFieldSetter(workflowContext),
-                        new MetricsFieldSetter(workflowContext.getMetrics()));
-
-      initializeInTransaction(action, workflowContext);
-    } catch (Throwable t) {
-      LOG.warn("Exception on WorkflowAction.initialize(), abort Workflow. {}", actionSpec, t);
-      // this will always rethrow
-      Throwables.propagateIfPossible(t, Exception.class);
-    } finally {
-      ClassLoaders.setContextClassLoader(oldClassLoader);
-    }
-
-    return action;
-  }
-
-  /**
-   * Calls the destroy method on the given WorkflowAction.
-   */
-  private void destroy(WorkflowActionSpecification actionSpec, WorkflowAction action) {
-    ClassLoader oldClassLoader = setContextCombinedClassLoader(action);
-    try {
-      action.destroy();
-    } catch (Throwable t) {
-      LOG.warn("Exception on WorkflowAction.destroy(): {}", actionSpec, t);
-      // Just log, but not propagate
-    } finally {
-      ClassLoaders.setContextClassLoader(oldClassLoader);
-    }
+    return new BasicWorkflowContext(workflowSpec, actionSpec,
+                                    workflowProgramRunnerFactory.getProgramWorkflowRunner(actionSpec, token, nodeId,
+                                                                                          nodeStates),
+                                    new BasicArguments(runtimeArgs), token, program,
+                                    RunIds.fromString(workflowRunId.getRun()), metricsCollectionService,
+                                    datasetFramework, txClient, discoveryServiceClient, nodeStates);
   }
 
   private Map<String, String> createRuntimeArgs(Arguments args) {
@@ -540,11 +561,6 @@ final class WorkflowDriver extends AbstractExecutionThreadService {
         return currentNodes;
       }
     };
-  }
-
-  private ClassLoader setContextCombinedClassLoader(WorkflowAction action) {
-    return ClassLoaders.setContextClassLoader(
-      new CombineClassLoader(null, ImmutableList.of(action.getClass().getClassLoader(), getClass().getClassLoader())));
   }
 
   /**

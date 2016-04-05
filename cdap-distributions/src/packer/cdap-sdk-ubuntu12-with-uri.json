@@ -29,7 +29,8 @@
         "initrd=/install/initrd.gz -- <enter>"
       ],
       "vboxmanage": [
-        ["modifyvm", "{{ .Name }}", "--memory", "4096"]
+        ["modifyvm", "{{ .Name }}", "--memory", "4096"],
+        ["modifyvm", "{{ .Name }}", "--nictype1", "virtio"]
       ],
       "vboxmanage_post": [
         ["modifyvm", "{{ .Name }}", "--clipboard", "bidirectional"],
@@ -89,7 +90,7 @@
         },
         "idea": {
           "setup_dir": "/opt",
-          "version": "15.0.2"
+          "version": "2016.1"
         },
         "hadoop": {
           "distribution": "hdp",

@@ -192,7 +192,7 @@ public class AvroFileReader {
       ILoggingEvent loggingEvent = LoggingEvent.decode(datum);
 
       // Stop when reached fromTimeMs
-      if (loggingEvent.getTimeStamp() > fromTimeMs) {
+      if (loggingEvent.getTimeStamp() >= fromTimeMs) {
         break;
       }
 

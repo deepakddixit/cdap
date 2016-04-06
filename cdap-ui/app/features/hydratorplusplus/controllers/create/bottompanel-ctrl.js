@@ -32,6 +32,10 @@ class HydratorPlusPlusBottomPanelCtrl {
       {
         title: 'Reference',
         template: '/assets/features/hydratorplusplus/templates/partial/reference-tab.html'
+      },
+      {
+        title: 'Preview',
+        template: '/assets/features/hydratorplusplus/templates/partial/preview.html'
       }
     ];
     this.HydratorPlusPlusBottomPanelActions = HydratorPlusPlusBottomPanelActions;

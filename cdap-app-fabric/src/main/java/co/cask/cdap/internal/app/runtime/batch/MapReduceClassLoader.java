@@ -139,10 +139,8 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
     MapReduceLoggingContext loggingContext = createMapReduceLoggingContext();
     LoggingContextAccessor.setLoggingContext(loggingContext);
 
-    System.setOut(new PrintStream(RedirectedPrintStream.
-      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stdout"), System.out), true));
-    System.setErr(new PrintStream(RedirectedPrintStream.
-      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stderr"), System.err), true));
+    System.setOut(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.out), true));
+    System.setErr(new PrintStream(RedirectedPrintStream.createRedirectedOutStream(LOG, System.err), true));
 
     synchronized (this) {
       taskContextProvider = Optional.fromNullable(taskContextProvider).or(taskContextProviderSupplier);

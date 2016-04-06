@@ -191,6 +191,8 @@ public class AvroFileReader {
       datum = dataFileReader.next(datum);
       ILoggingEvent loggingEvent = LoggingEvent.decode(datum);
 
+      LOG.trace("timestamp: {}, fromTimeMs: {}", loggingEvent.getTimeStamp(), fromTimeMs);
+
       // Stop when reached fromTimeMs
       if (loggingEvent.getTimeStamp() >= fromTimeMs) {
         break;

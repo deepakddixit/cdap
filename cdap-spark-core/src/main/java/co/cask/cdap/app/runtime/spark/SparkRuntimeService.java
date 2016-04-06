@@ -34,11 +34,14 @@ import co.cask.cdap.data2.transaction.Transactions;
 import co.cask.cdap.data2.util.hbase.HBaseTableUtilFactory;
 import co.cask.cdap.internal.app.runtime.LocalizationUtils;
 import co.cask.cdap.internal.app.runtime.distributed.LocalizeResource;
+import co.cask.cdap.internal.lang.Fields;
 import co.cask.tephra.TransactionContext;
 import co.cask.tephra.TransactionFailureException;
 import com.google.common.base.Charsets;
 import com.google.common.base.Objects;
+import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.io.ByteStreams;
@@ -47,6 +50,7 @@ import com.google.common.util.concurrent.AbstractExecutionThreadService;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.util.ShutdownHookManager;
 import org.apache.spark.SparkConf;
 import org.apache.spark.deploy.SparkSubmit;
 import org.apache.twill.api.ClassAcceptor;
@@ -62,10 +66,13 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Writer;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -504,6 +511,9 @@ final class SparkRuntimeService extends AbstractExecutionThreadService {
 
       @Override
       public void run() {
+        cleanupShutdownHooks();
+        invalidateBeanIntrospectorCache();
+
         // Cleanup all system properties setup by SparkSubmit
         Iterable<String> sparkKeys = Iterables.filter(System.getProperties().stringPropertyNames(),
                                                       Predicates.containsPattern("^spark\\."));
@@ -525,6 +535,76 @@ final class SparkRuntimeService extends AbstractExecutionThreadService {
         }
       }
     };
+  }
+
+  /**
+   * Cleanup all shutdown hooks added by Spark and execute them directly.
+   * This is needed so that for CDAP standalone, it won't leak memory through shutdown hooks.
+   */
+  private void cleanupShutdownHooks() {
+    // With Hadoop 2, Spark uses the Hadoop ShutdownHookManager
+    ShutdownHookManager manager = ShutdownHookManager.get();
+    try {
+      // Use reflection to get the shutdown hooks
+      Method getShutdownHooksInOrder = manager.getClass().getDeclaredMethod("getShutdownHooksInOrder");
+      if (!Collection.class.isAssignableFrom(getShutdownHooksInOrder.getReturnType())) {
+        LOG.warn("Unsupported method {}. Spark shutdown hooks cleanup skipped.", getShutdownHooksInOrder);
+        return;
+      }
+      getShutdownHooksInOrder.setAccessible(true);
+
+      // Filter out hooks that are defined in the same SparkRunnerClassLoader as this SparkProgramRunner class
+      // This is for the case when there are concurrent Spark job running in the same VM
+      List<Runnable> hooks = ImmutableList.copyOf(
+        Iterables.filter(
+          Iterables.filter((Collection<?>) getShutdownHooksInOrder.invoke(manager), Runnable.class),
+          new Predicate<Runnable>() {
+            @Override
+            public boolean apply(Runnable runnable) {
+              return runnable.getClass().getClassLoader() == SparkRuntimeService.this.getClass().getClassLoader();
+            }
+          }
+        )
+      );
+
+      for (Runnable hook : hooks) {
+        LOG.debug("Running Spark shutdown hook {}", hook);
+        hook.run();
+        manager.removeShutdownHook(hook);
+      }
+
+    } catch (Exception e) {
+      LOG.warn("Failed to cleanup Spark shutdown hooks.", e);
+    }
+  }
+
+  /**
+   * Clear the constructor cache in the BeanIntrospector to avoid leaking ClassLoader.
+   */
+  private void invalidateBeanIntrospectorCache() {
+    try {
+      // Get the class through reflection since some Spark version doesn't depend on the fasterxml scala module.
+      // This is to avoid class not found issue
+      Class<?> cls = Class.forName("com.fasterxml.jackson.module.scala.introspect.BeanIntrospector$");
+      Field field = Fields.findField(cls, "ctorParamNamesCache");
+      field.setAccessible(true);
+
+      // Get the cache field and invalid it.
+      // The BeanIntrospector is a scala object and scala generates a static MODULE$ field to the singleton object
+      Object cache = field.get(Fields.findField(cls, "MODULE$").get(null));
+      if (cache instanceof LoadingCache) {
+        ((LoadingCache) cache).invalidateAll();
+        LOG.debug("BeanIntrospector.ctorParamNamesCache is being invalidated.");
+      } else {
+        // Unexpected, maybe due to version change in the BeanIntrospector, hence log a WARN.
+        LOG.warn("BeanIntrospector.ctorParamNamesCache is not a LoadingCache, may lead to memory leak in SDK.");
+      }
+    } catch (ClassNotFoundException e) {
+      // If there is no BeanIntrospector, that's ok since some Spark version may not be using it
+      LOG.debug("No BeanIntrospector class found");
+    } catch (Exception e) {
+      LOG.warn("Failed to cleanup BeanIntrospector cache, may lead to memory leak in SDK.", e);
+    }
   }
 
   /**

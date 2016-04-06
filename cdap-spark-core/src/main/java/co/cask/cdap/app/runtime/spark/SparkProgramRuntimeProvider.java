@@ -27,9 +27,13 @@ import co.cask.cdap.proto.ProgramType;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.io.Closeables;
+import com.google.inject.Inject;
 import com.google.inject.Injector;
+import com.google.inject.Key;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Type;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
@@ -79,7 +83,7 @@ public class SparkProgramRuntimeProvider implements ProgramRuntimeProvider {
           // Closing of the SparkRunnerClassLoader is done by the SparkProgramRunner when the program execution finished
           // The current CDAP call run right after it get a ProgramRunner and never reuse a ProgramRunner.
           // TODO: CDAP-5506 to refactor the program runtime architecture to remove the need of this assumption
-          return (ProgramRunner) injector.getInstance(classLoader.loadClass(SPARK_PROGRAM_RUNNER_CLASS_NAME));
+          return createSparkProgramRunner(injector, classLoader.loadClass(SPARK_PROGRAM_RUNNER_CLASS_NAME));
         } finally {
           ClassLoaders.setContextClassLoader(oldClassLoader);
         }
@@ -91,6 +95,35 @@ public class SparkProgramRuntimeProvider implements ProgramRuntimeProvider {
     } catch (Throwable t) {
       throw Throwables.propagate(t);
     }
+  }
+
+  /**
+   * Create a new instance of {@link ProgramRunner} for Spark from the given {@link Injector}.
+   *
+   * @param injector The Guice Injector for acquiring CDAP system instances
+   * @param programRunnerClass the class of the ProgramRunner to create
+   * @return a new instance of {@link ProgramRunner}.
+   */
+  private ProgramRunner createSparkProgramRunner(Injector injector, Class<?> programRunnerClass) throws Exception {
+    // We cannot get the SparkProgramRunner instance from the Injector directly as the guice injector will
+    // cache the class, leading to ClassLoader leakage
+    for (Constructor<?> constructor : programRunnerClass.getDeclaredConstructors()) {
+      // Find the @Inject constructor
+      if (!constructor.isAnnotationPresent(Inject.class)) {
+        continue;
+      }
+      constructor.setAccessible(true);
+
+      // Acquire the instances for each parameter for the constructor
+      Type[] paramTypes = constructor.getGenericParameterTypes();
+      Object[] args = new Object[paramTypes.length];
+      int i = 0;
+      for (Type paramType : paramTypes) {
+        args[i++] = injector.getInstance(Key.get(paramType));
+      }
+      return (ProgramRunner) constructor.newInstance(args);
+    }
+    throw new InstantiationException("Failed to create instance of " + programRunnerClass.getName());
   }
 
   private synchronized URL[] getClassLoaderURLs(CConfiguration cConf) throws IOException {

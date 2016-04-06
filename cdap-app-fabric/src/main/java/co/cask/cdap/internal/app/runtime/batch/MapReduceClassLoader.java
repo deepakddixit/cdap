@@ -69,13 +69,6 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
 
   private static final Logger LOG = LoggerFactory.getLogger(MapReduceClassLoader.class);
 
-  static {
-    System.setOut(new PrintStream(RedirectedPrintStream.
-      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stdout"), System.out), true));
-    System.setErr(new PrintStream(RedirectedPrintStream.
-      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stderr"), System.err), true));
-  }
-
   private final Parameters parameters;
   // Supplier for MapReduceTaskContextProvider. Need to wrap it with a supplier to delay calling
   // MapReduceTaskContextProvider.start() since it shouldn't be called in constructor.
@@ -145,6 +138,11 @@ public class MapReduceClassLoader extends CombineClassLoader implements AutoClos
     // Logging context needs to be set in main thread.
     MapReduceLoggingContext loggingContext = createMapReduceLoggingContext();
     LoggingContextAccessor.setLoggingContext(loggingContext);
+
+    System.setOut(new PrintStream(RedirectedPrintStream.
+      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stdout"), System.out), true));
+    System.setErr(new PrintStream(RedirectedPrintStream.
+      createRedirectedOutStream(LoggerFactory.getLogger("Explore.stderr"), System.err), true));
 
     synchronized (this) {
       taskContextProvider = Optional.fromNullable(taskContextProvider).or(taskContextProviderSupplier);

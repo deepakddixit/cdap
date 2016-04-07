@@ -26,7 +26,8 @@ angular.module(PKG.name + '.services')
         pluginsFetchPath = pluginFetchBase + '?scope=system',
         extensionsFetchPath = extensionsFetchBase + '?scope=system',
         pluginDetailFetch = pluginFetchBase + '/plugins/:pluginName?scope=system',
-        artifactPropertiesPath = '/namespaces/:namespace/artifacts/:artifactName/versions/:artifactVersion/properties';
+        artifactPropertiesPath = '/namespaces/:namespace/artifacts/:artifactName/versions/:artifactVersion/properties',
+        previewPath = '/namespaces/:namespace/artifacts/:artifactName/versions/:artifactVersion/plugintypes/:pluginType/plugins/:pluginName/methods/preview?scope=system';
 
 
     return $resource(
@@ -61,7 +62,8 @@ angular.module(PKG.name + '.services')
         get: myHelpers.getConfig('GET', 'REQUEST', pipelinePath),
         datasets: myHelpers.getConfig('GET', 'REQUEST', pipelinePath + '/datasets', true),
         streams: myHelpers.getConfig('GET', 'REQUEST', pipelinePath + '/streams', true),
-        action: myHelpers.getConfig('POST', 'REQUEST', pipelinePath + '/:action')
+        action: myHelpers.getConfig('POST', 'REQUEST', pipelinePath + '/:action'),
+        preview: myHelpers.getConfig('POST', 'REQUEST', previewPath, true, { suppressErrors: true })
       }
     );
   });

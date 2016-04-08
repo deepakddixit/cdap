@@ -19,8 +19,8 @@ angular.module(PKG.name + '.services')
     // Should be under property called 'artifactTypes' to be consistent. GLOBALS.etlBatch doesn't make much sense.
     etlBatch: 'cdap-etl-batch',
     etlRealtime: 'cdap-etl-realtime',
-    etlDataPipeline: 'cdap-data-pipeline',
-    etlBatchPipelines: ['cdap-etl-batch', 'cdap-data-pipeline'],
+    etlDataPipeline: 'cdap-etl-data-pipeline',
+    etlBatchPipelines: ['cdap-etl-batch', 'cdap-etl-data-pipeline'],
     pluginTypes: {
       'cdap-etl-batch': {
         'source': 'batchsource',
@@ -32,7 +32,7 @@ angular.module(PKG.name + '.services')
         'sink': 'realtimesink',
         'transform': 'transform'
       },
-      'cdap-data-pipeline': {
+      'cdap-etl-data-pipeline': {
         'source': 'batchsource',
         'sink': 'batchsink',
         'transform': 'transform',

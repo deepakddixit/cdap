@@ -134,24 +134,38 @@ public final class LoggingContextHelper {
 
   public static LoggingContext getLoggingContext(String namespaceId, String applicationId, String entityId,
                                                  ProgramType programType) {
-    return getLoggingContext(namespaceId, applicationId, entityId, programType, null);
+    return getLoggingContext(namespaceId, applicationId, entityId, programType, null, null);
   }
 
   public static LoggingContext getLoggingContextWithRunId(String namespaceId, String applicationId, String entityId,
-                                                          ProgramType programType, String runId) {
-    return getLoggingContext(namespaceId, applicationId, entityId, programType, runId);
+                                                          ProgramType programType, String runId,
+                                                          Map<String, String> systemArgs) {
+    return getLoggingContext(namespaceId, applicationId, entityId, programType, runId, systemArgs);
   }
 
   public static LoggingContext getLoggingContext(String namespaceId, String applicationId, String entityId,
-                                                 ProgramType programType, @Nullable String runId) {
+                                                 ProgramType programType, @Nullable String runId,
+                                                 @Nullable Map<String, String> systemArgs) {
     switch (programType) {
       case FLOW:
         return new FlowletLoggingContext(namespaceId, applicationId, entityId, "", runId, null);
       case WORKFLOW:
         return new WorkflowLoggingContext(namespaceId, applicationId, entityId, runId);
       case MAPREDUCE:
+        if (systemArgs != null && systemArgs.containsKey("workflowRunId")) {
+          String workflowRunId = systemArgs.get("workflowRunId");
+          String workflowId = systemArgs.get("workflowName");
+          return new WorkflowProgramLoggingContext(namespaceId, applicationId, workflowId, workflowRunId, programType,
+                                                   entityId);
+        }
         return new MapReduceLoggingContext(namespaceId, applicationId, entityId, runId);
       case SPARK:
+        if (systemArgs != null && systemArgs.containsKey("workflowRunId")) {
+          String workflowRunId = systemArgs.get("workflowRunId");
+          String workflowId = systemArgs.get("workflowName");
+          return new WorkflowProgramLoggingContext(namespaceId, applicationId, workflowId, workflowRunId, programType,
+                                                   entityId);
+        }
         return new SparkLoggingContext(namespaceId, applicationId, entityId, runId);
       case SERVICE:
         return new UserServiceLoggingContext(namespaceId, applicationId, entityId, "", runId, null);

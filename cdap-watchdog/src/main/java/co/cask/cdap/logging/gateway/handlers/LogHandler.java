@@ -84,16 +84,6 @@ public class LogHandler extends AbstractHttpHandler {
     doGetLogs(responder, loggingContext, fromTimeSecsParam, toTimeSecsParam, escape, filterStr, null);
   }
 
-  private LoggingContext getLoggingContext(String namespaceId, String appId, ProgramType programType, String programId,
-                                           String runId, Map<String, String> systemArgs) {
-    if (systemArgs != null && systemArgs.containsKey("workflowRunId")) {
-      String workflowRunId = systemArgs.get("workflowRunId");
-      String workflowId = systemArgs.get("workflowName");
-      return new WorkflowProgramLoggingContext(namespaceId, appId, workflowId, workflowRunId, programType, programId);
-    }
-    return LoggingContextHelper.getLoggingContextWithRunId(namespaceId, appId, programId, programType, runId);
-  }
-
   @GET
   @Path("/namespaces/{namespace-id}/apps/{app-id}/{program-type}/{program-id}/runs/{run-id}/logs")
   public void getRunIdLogs(HttpRequest request, HttpResponder responder, @PathParam("namespace-id") String namespaceId,
@@ -106,8 +96,9 @@ public class LogHandler extends AbstractHttpHandler {
     RunRecordMeta runRecord = programStore.getRun(
       Id.Program.from(namespaceId, appId, ProgramType.valueOfCategoryName(programType), programId), runId);
 
-    LoggingContext loggingContext = getLoggingContext(namespaceId, appId, ProgramType.valueOfCategoryName(programType),
-                                                      programId, runId, runRecord.getSystemArgs());
+    ProgramType type = ProgramType.valueOfCategoryName(programType);
+    LoggingContext loggingContext = LoggingContextHelper.getLoggingContextWithRunId(namespaceId, appId, programId, type,
+                                                                                    runId, runRecord.getSystemArgs());
 
     doGetLogs(responder, loggingContext, fromTimeSecsParam, toTimeSecsParam, escape, filterStr, runRecord);
   }
@@ -164,8 +155,9 @@ public class LogHandler extends AbstractHttpHandler {
     RunRecordMeta runRecord = programStore.getRun(
       Id.Program.from(namespaceId, appId, ProgramType.valueOfCategoryName(programType), programId), runId);
 
-    LoggingContext loggingContext = getLoggingContext(namespaceId, appId, ProgramType.valueOfCategoryName(programType),
-                                                      programId, runId, runRecord.getSystemArgs());
+    ProgramType type = ProgramType.valueOfCategoryName(programType);
+    LoggingContext loggingContext = LoggingContextHelper.getLoggingContextWithRunId(namespaceId, appId, programId, type,
+                                                                                    runId, runRecord.getSystemArgs());
 
     doNext(responder, loggingContext, maxEvents, fromOffsetStr, escape, filterStr, runRecord);
   }
@@ -242,8 +234,9 @@ public class LogHandler extends AbstractHttpHandler {
     RunRecordMeta runRecord = programStore.getRun(
       Id.Program.from(namespaceId, appId, ProgramType.valueOfCategoryName(programType), programId), runId);
 
-    LoggingContext loggingContext = getLoggingContext(namespaceId, appId, ProgramType.valueOfCategoryName(programType),
-                                                      programId, runId, runRecord.getSystemArgs());
+    ProgramType type = ProgramType.valueOfCategoryName(programType);
+    LoggingContext loggingContext = LoggingContextHelper.getLoggingContextWithRunId(namespaceId, appId, programId, type,
+                                                                                    runId, runRecord.getSystemArgs());
 
     doPrev(responder, loggingContext, maxEvents, fromOffsetStr, escape, filterStr, runRecord);
   }

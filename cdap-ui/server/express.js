@@ -276,6 +276,24 @@ function makeApp (authAddress, cdapConfig) {
     }
   ]);
 
+  app.get('/getConfig', function (req, res) {
+    var path = __dirname + '/config/cdap-ui-config.json';
+
+    var fileConfig = {};
+
+    try {
+      fileConfig = JSON.parse(fs.readFileSync(path, 'utf8'));
+      res.send(fileConfig);
+    } catch (e) {
+      var error = {
+        code: e.code,
+        message: 'Error with UI config file.'
+      };
+      log.debug(error.message);
+      res.status(500).send(error);
+    }
+  });
+
   app.get('/predefinedapps/:apptype', [
       function (req, res) {
         var apptype = req.params.apptype;

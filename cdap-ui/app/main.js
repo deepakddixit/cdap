@@ -231,18 +231,6 @@ angular
   }])
 
   /*
-    Load UI Config
-  */
-  .run(function ($http, MY_CONFIG, UI_CONFIG) {
-    $http.get(
-      (MY_CONFIG.sslEnabled? 'https://': 'http://') + window.location.host + '/getConfig',
-      {ignoreLoadingBar: true}
-    ).success(function (res) {
-      UI_CONFIG._loadConfig(res);
-    });
-  })
-
-  /*
     FIXME: This is a one time only thing. Once all old users who migrated to 3.3 have their drafts moved from global level to
           namespace level this snippet can be removed. Ideally in 4.* we should be able to remove this.
   */

@@ -81,6 +81,20 @@ function makeApp (authAddress, cdapConfig) {
               '.constant("MY_CONFIG",'+data+');');
   });
 
+  app.get('/ui-config.js', function (req, res) {
+    var path = __dirname + '/config/cdap-ui-config.json';
+
+    var fileConfig = {};
+
+    fileConfig = fs.readFileSync(path, 'utf8');
+    res.header({
+      'Content-Type': 'text/javascript',
+      'Cache-Control': 'no-store, must-revalidate'
+    });
+    res.send('angular.module("'+pkg.name+'.config")' +
+              '.constant("UI_CONFIG",'+fileConfig+');');
+  });
+
   app.post('/downloadQuery', function(req, res) {
     var fs = require('fs');
     var StringDecoder = require('string_decoder').StringDecoder;
@@ -275,24 +289,6 @@ function makeApp (authAddress, cdapConfig) {
       });
     }
   ]);
-
-  app.get('/getConfig', function (req, res) {
-    var path = __dirname + '/config/cdap-ui-config.json';
-
-    var fileConfig = {};
-
-    try {
-      fileConfig = JSON.parse(fs.readFileSync(path, 'utf8'));
-      res.send(fileConfig);
-    } catch (e) {
-      var error = {
-        code: e.code,
-        message: 'Error with UI config file.'
-      };
-      log.debug(error.message);
-      res.status(500).send(error);
-    }
-  });
 
   app.get('/predefinedapps/:apptype', [
       function (req, res) {

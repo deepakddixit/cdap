@@ -19,11 +19,13 @@ package co.cask.cdap.api.dataset.table;
 import co.cask.cdap.api.common.Bytes;
 import co.cask.cdap.api.data.batch.Split;
 
+
 /**
  * Table splits are simply a start and stop key.
  */
 public class TableSplit extends Split {
   private final byte[] start, stop;
+  private String[] locations = new String[0];
 
   public TableSplit(byte[] start, byte[] stop) {
     this.start = start;
@@ -36,6 +38,20 @@ public class TableSplit extends Split {
 
   public byte[] getStop() {
     return stop;
+  }
+
+  @Override
+  public String[] getLocations() {
+    return locations;
+  }
+
+  /**
+   * Set locations of this split.
+   * This will help in launching tasks data local.
+   * @param locations Array of hosts where this split reside
+   */
+  public void setLocations(String[] locations) {
+          this.locations = locations;
   }
 
   @Override

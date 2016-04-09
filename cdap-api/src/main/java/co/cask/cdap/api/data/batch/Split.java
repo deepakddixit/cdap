@@ -31,4 +31,10 @@ public abstract class Split {
   public long getLength() {
     return 0;
   }
+
+  /**
+   * Default it returns empty location array.
+   * @return Array of hosts where this split is situated
+   */
+  public String[] getLocations() { return new String[0]; }
 }

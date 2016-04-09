@@ -54,8 +54,7 @@ public class DataSetInputSplit extends InputSplit implements Writable {
 
   @Override
   public String[] getLocations() throws IOException, InterruptedException {
-    // By default splits locations are not provided (todo: fix)
-    return new String[0];
+    return split.getLocations();
   }
 
   @Override
